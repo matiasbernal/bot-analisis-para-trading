@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Backtest · {{ strategy.name }}{% endblock %}
+{% block content %}
+
+<header>
+  <h1>{{ strategy.name }}</h1>
+  <p class="muted">
+    {{ symbols|join(' · ') }}<br>
+    {{ period.start }} → {{ period.end }} · {{ period.bars }} velas ·
+    {{ metrics.n_trades }} trades
+  </p>
+</header>
+
+{% if warnings %}
+  {% for warning in warnings %}
+  <div class="banner {{ 'strong' if warning.strong else '' }}">{{ warning.text }}</div>
+  {% endfor %}
+{% endif %}
+
+<h2>Estrategia vs. buy &amp; hold</h2>
+<section class="cards">
+  {% for card in cards %}
+  <div class="card">
+    <span class="label">{{ card.label }}</span>
+    <span class="value {{ card.klass }}">{{ card.value }}</span>
+    {% if card.bench %}<span class="bench">B&amp;H: {{ card.bench }}</span>{% endif %}
+  </div>
+  {% endfor %}
+</section>
+
+<h2>Equity</h2>
+<div class="chart">{{ charts.equity|safe }}</div>
+
+<h2>Drawdown</h2>
+<div class="chart">{{ charts.drawdown|safe }}</div>
+
+{% for chart in charts.prices %}
+<h2>{{ chart.symbol }}</h2>
+<div class="chart">{{ chart.html|safe }}</div>
+{% endfor %}
+
+<h2>Salidas</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Motivo</th><th>Trades</th><th>%</th><th>P&amp;L medio</th><th>R medio</th></tr></thead>
+    <tbody>
+    {% for row in exit_breakdown %}
+      <tr>
+        <td>{{ row.reason }}</td>
+        <td>{{ row.count }}</td>
+        <td>{{ row.pct }}</td>
+        <td class="{{ row.klass }}">{{ row.avg_pnl }}</td>
+        <td class="{{ row.klass }}">{{ row.avg_r }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if in_out %}
+<h2>In-sample vs. out-of-sample</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Tramo</th><th>CAGR</th><th>MDD</th><th>Trades</th><th>Expectancy</th></tr></thead>
+    <tbody>
+      {% for row in in_out %}
+      <tr>
+        <td>{{ row.label }}</td><td>{{ row.cagr }}</td><td>{{ row.mdd }}</td>
+        <td>{{ row.n }}</td><td>{{ row.expectancy }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="muted">El out-of-sample se mira una vez, al final. Si se mira veinte veces, deja de serlo.</p>
+{% endif %}
+
+<h2>Trades</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Símbolo</th><th>R</th><th>Salida</th><th>P&amp;L</th>
+        <th>Entrada</th><th>Precio</th><th>Acciones</th><th>Stop</th>
+        <th>Cierre</th><th>Precio</th><th>Velas</th><th>MAE</th><th>MFE</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for t in trades %}
+      <tr>
+        <td>{{ t.symbol }}</td>
+        <td class="{{ t.klass }}">{{ t.pnl_r }}</td>
+        <td>{{ t.exit_reasons }}</td>
+        <td class="{{ t.klass }}">{{ t.pnl }}</td>
+        <td>{{ t.entry_date }}</td>
+        <td>{{ t.entry_price }}</td>
+        <td>{{ t.shares }}</td>
+        <td>{{ t.stop_initial }}</td>
+        <td>{{ t.exit_date }}</td>
+        <td>{{ t.exit_price }}</td>
+        <td>{{ t.bars_held }}</td>
+        <td>{{ t.mae_r }}</td>
+        <td>{{ t.mfe_r }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if rejections %}
+<h2>Señales rechazadas</h2>
+<details>
+  <summary>{{ rejections|length }} señales no se pudieron tomar</summary>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Fecha</th><th>Símbolo</th><th>Motivo</th></tr></thead>
+      <tbody>
+      {% for r in rejections %}
+        <tr><td>{{ r.date }}</td><td>{{ r.symbol }}</td><td>{{ r.reason }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
+{% endif %}
+
+<footer class="muted stack">
+  <p>
+    Costos aplicados: comisión {{ strategy.execution.commission_pct }}% y slippage
+    {{ strategy.execution.slippage_pct }}% en cada entrada y en cada salida
+    (total {{ costs_total }}).
+  </p>
+  <p>Señal al cierre de t, ejecución en la apertura de t+1. Stop antes que objetivo en la misma vela.</p>
+  <p>Manifiesto {{ manifest.fingerprint[:16] }} · commit {{ manifest.code_commit[:12] }} · datos {{ manifest.data.hash[:16] }}</p>
+  <p>Generado {{ generated_at }}</p>
+</footer>
+{% endblock %}

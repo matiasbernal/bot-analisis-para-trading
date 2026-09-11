@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>{% block title %}tradingbot{% endblock %}</title>
+<style>
+/* Mobile-first de verdad: una columna por defecto, breakpoints solo hacia
+   arriba (min-width). Nada de max-width para "arreglar" el móvil después. */
+:root {
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --border: #e0ded8;
+  --text: #1b1b18;
+  --muted: #6a675f;
+  --accent: #13795b;
+  --danger: #b3261e;
+  --warn: #8a6100;
+  --radius: 12px;
+  --gap: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181a;
+    --surface: #1f2225;
+    --border: #33383d;
+    --text: #eceff1;
+    --muted: #a5adb5;
+    --accent: #4ec49a;
+    --danger: #ff8a80;
+    --warn: #ffc85c;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  padding: var(--gap);
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  overflow-x: hidden;
+}
+h1 { font-size: 1.35rem; margin: 0 0 .2rem; }
+h2 { font-size: 1.05rem; margin: 1.6rem 0 .6rem; }
+p { margin: .4rem 0; }
+.muted { color: var(--muted); font-size: .85rem; }
+.stack > * + * { margin-top: var(--gap); }
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap);
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .7rem .8rem;
+  min-width: 0;
+}
+.card .label { display: block; font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.card .value { display: block; font-size: 1.35rem; font-weight: 650; margin-top: .15rem; word-break: break-word; }
+.card .bench { display: block; font-size: .78rem; color: var(--muted); margin-top: .1rem; }
+.pos { color: var(--accent); }
+.neg { color: var(--danger); }
+
+.banner {
+  border-left: 4px solid var(--warn);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: .7rem .8rem;
+  font-size: .9rem;
+}
+.banner.strong { border-left-color: var(--danger); font-weight: 600; }
+
+/* El gráfico define su alto a partir del ancho (lo ajusta el JS del final). */
+.chart {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .4rem;
+  width: 100%;
+  overflow: hidden;
+}
+.chart > div { width: 100% !important; }
+
+/* La tabla scrollea sola; la página nunca scrollea en horizontal. */
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+table { border-collapse: collapse; width: 100%; font-size: .86rem; }
+th, td { padding: .5rem .6rem; text-align: right; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; position: sticky; left: 0; background: var(--surface); }
+thead th { border-bottom: 1px solid var(--border); color: var(--muted); font-weight: 600; }
+tbody tr + tr td { border-top: 1px solid var(--border); }
+
+details > summary {
+  cursor: pointer;
+  min-height: 44px;           /* objetivo táctil, no depende de hover */
+  display: flex;
+  align-items: center;
+  padding: 0 .2rem;
+}
+footer { margin-top: 2rem; }
+
+@media (min-width: 700px) {
+  body { padding: 24px; max-width: 1100px; margin: 0 auto; }
+  .cards { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+</style>
+</head>
+<body>
+<main class="stack">
+{% block content %}{% endblock %}
+</main>
+<script>
+// Altura de cada gráfico relativa a su ancho, no fija en píxeles.
+function resizeCharts() {
+  document.querySelectorAll('.chart > .js-plotly-plot').forEach(function (el) {
+    var width = el.parentElement.clientWidth;
+    var height = Math.max(220, Math.min(460, Math.round(width * 0.62)));
+    if (window.Plotly) { Plotly.relayout(el, {height: height}); }
+  });
+}
+window.addEventListener('load', resizeCharts);
+window.addEventListener('resize', resizeCharts);
+</script>
+</body>
+</html>
