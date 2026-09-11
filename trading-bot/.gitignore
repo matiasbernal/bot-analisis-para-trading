@@ -1,0 +1,11 @@
+data_cache/
+config/settings.yaml
+journal.db
+reports/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/

@@ -1,0 +1,12 @@
+# Símbolos a vigilar. Las etiquetas (sector, tema) las usa el límite por grupo
+# de la tanda 2 (`risk.max_per_group`); en la tanda 1 se ignoran.
+#
+# Sesgo de supervivencia: las plantillas se validan primero sobre ETFs amplios.
+# Un ETF no quiebra ni se deslista, así que el sesgo casi desaparece. Un universo
+# de acciones elegido a dedo sabiendo cuáles ganaron produce resultados
+# optimistas, y el informe lo dice.
+symbols:
+  - {symbol: SPY,  sector: etf,        tema: mercado_amplio}
+  - {symbol: QQQ,  sector: etf,        tema: tecnologia}
+  - {symbol: AAPL, sector: technology, tema: hardware}
+  - {symbol: MSFT, sector: technology, tema: software}

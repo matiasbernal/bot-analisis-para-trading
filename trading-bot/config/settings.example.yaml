@@ -1,0 +1,5 @@
+# Copiar a config/settings.yaml (que va en .gitignore) y ajustar.
+provider: yahoo          # yahoo | stooq | local
+cache_dir: data_cache    # parquet + sidecar JSON por símbolo
+data_dir: tests/fixtures # CSV locales, cuando provider = local
+reports_dir: reports     # informes HTML y manifiestos
