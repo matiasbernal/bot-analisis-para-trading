@@ -1,0 +1,40 @@
+# Retroceso sobre tendencia alcista: comprar miedo, no ruptura.
+name: rsi_pullback
+universe: [AAPL, MSFT, SPY, QQQ]
+interval: 1d
+warmup_bars: 200
+
+indicators:
+  sma_trend: {type: sma, source: close, period: 200}
+  rsi:       {type: rsi, source: close, period: 14}
+  atr:       {type: atr, period: 14}
+
+entry:
+  all:
+    - {left: close, op: ">", right: sma_trend}     # solo a favor de la tendencia
+    - {left: rsi,   op: "<", right: 35}            # retroceso, no derrumbe
+
+exits:
+  signal:
+    any:
+      - {left: rsi,   op: ">", right: 60}
+      - {left: close, op: "<", right: sma_trend}
+  hard_stop:   {mode: atr, multiple: 2.5, atr_period: 14}
+  take_profit: {mode: rr,  ratio: 2.0}
+
+execution:
+  signal_on:      close
+  fill_on:        next_open
+  commission_pct: 0.05
+  slippage_pct:   0.05
+
+risk:
+  position_sizing:    {mode: risk_pct, risk_pct: 1.0, on: current_equity}
+  max_position_pct:   20
+  max_open_positions: 4
+
+backtest:
+  start:         2010-01-01
+  end:           2025-12-31
+  initial_cash:  10000
+  in_sample_end: 2020-12-31

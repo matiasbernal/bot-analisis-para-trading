@@ -1,0 +1,45 @@
+# Cruce de medias con filtro de tendencia.
+# Plantilla de la tanda 1: solo hard stop + take profit.
+# El trailing, el break-even y la reversión llegan en la tanda 2 (Fase 3);
+# config.py los rechaza con un mensaje explícito si se agregan ahora.
+name: ema_cross_trend_filter
+universe: [AAPL, MSFT, SPY, QQQ]
+interval: 1d
+warmup_bars: 200              # barras descartadas hasta que los indicadores son válidos
+
+indicators:
+  ema_fast:  {type: ema,  source: close, period: 20}
+  ema_slow:  {type: ema,  source: close, period: 50}
+  sma_trend: {type: sma,  source: close, period: 200}
+  rsi:       {type: rsi,  source: close, period: 14}
+  atr:       {type: atr,  period: 14}
+
+entry:
+  all:                                                    # AND
+    - {left: ema_fast, op: crosses_above, right: ema_slow}
+    - {left: close,    op: ">",           right: sma_trend}
+    - {left: rsi,      op: "<",           right: 70}
+
+exits:
+  signal:                      # la salida por reglas es UNA capa más
+    any:
+      - {left: ema_fast, op: crosses_below, right: ema_slow}
+  hard_stop:   {mode: atr, multiple: 2.0, atr_period: 14}
+  take_profit: {mode: rr,  ratio: 3.0}
+
+execution:
+  signal_on:      close          # la regla se evalúa con la vela CERRADA
+  fill_on:        next_open      # la orden se ejecuta en la apertura siguiente
+  commission_pct: 0.05
+  slippage_pct:   0.05
+
+risk:
+  position_sizing:    {mode: risk_pct, risk_pct: 1.0, on: current_equity}
+  max_position_pct:   20         # ninguna posición supera el 20% del equity
+  max_open_positions: 5
+
+backtest:
+  start:         2010-01-01
+  end:           2025-12-31
+  initial_cash:  10000
+  in_sample_end: 2020-12-31      # todo lo posterior queda reservado como out-of-sample

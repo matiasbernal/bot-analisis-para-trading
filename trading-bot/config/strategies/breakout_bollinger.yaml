@@ -1,0 +1,45 @@
+# Ruptura de la banda superior con filtro de fuerza de tendencia (ADX).
+#
+# Nota: la plantilla `breakout_52w` del plan necesita un indicador de máximo
+# móvil (donchian / highest) que no está en la tanda 1. Cuando exista, la
+# ruptura de 52 semanas es una línea de YAML, no código nuevo.
+name: breakout_bollinger
+universe: [AAPL, MSFT, SPY, QQQ]
+interval: 1d
+warmup_bars: 200
+
+indicators:
+  bb:        {type: bollinger, source: close, period: 20, std: 2.0}
+  sma_trend: {type: sma, source: close, period: 200}
+  adx:       {type: adx, period: 14}
+  atr:       {type: atr, period: 14}
+
+entry:
+  all:
+    - {left: close, op: crosses_above, right: bb.upper}
+    - {left: close, op: ">",           right: sma_trend}
+    - {left: adx,   op: ">",           right: 20}        # solo con tendencia con fuerza
+
+exits:
+  signal:
+    any:
+      - {left: close, op: crosses_below, right: bb.middle}
+  hard_stop:   {mode: atr, multiple: 2.0, atr_period: 14}
+  take_profit: {mode: rr,  ratio: 3.0}
+
+execution:
+  signal_on:      close
+  fill_on:        next_open
+  commission_pct: 0.05
+  slippage_pct:   0.05
+
+risk:
+  position_sizing:    {mode: risk_pct, risk_pct: 1.0, on: current_equity}
+  max_position_pct:   25
+  max_open_positions: 4
+
+backtest:
+  start:         2010-01-01
+  end:           2025-12-31
+  initial_cash:  10000
+  in_sample_end: 2020-12-31
