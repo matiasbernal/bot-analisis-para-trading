@@ -7,6 +7,10 @@ No ejecuta órdenes: analiza, avisa y mide.
 El diseño completo está en [`PLAN.md`](PLAN.md). Esto es la **tanda 1** (Fases 0,
 1 y 2): la capa de datos, los indicadores y un motor de backtest validado.
 
+> **¿Llegás sin contexto?** [`ESTADO.md`](ESTADO.md) cuenta dónde está el
+> proyecto, qué se decidió después de cerrar la tanda 1 y **por qué** cada cosa
+> es como es. Empezá por ahí.
+
 ## Qué hay y qué no
 
 | Funciona hoy | Llega en la tanda 2 |
