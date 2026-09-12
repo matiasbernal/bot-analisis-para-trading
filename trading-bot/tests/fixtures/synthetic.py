@@ -129,10 +129,14 @@ def synthetic_universe(
 #: distinguir de un límite de heat total, porque todas las posiciones serían
 #: igual de redundantes entre sí. Con correlación alta adentro del grupo y baja
 #: entre grupos, el límite por grupo tiene algo que hacer.
+#: El reparto no es decorativo: para poder testear ``max_per_group: {sector: 2}``
+#: hace falta al menos un grupo con 4 símbolos (tres señales simultáneas dejan
+#: una afuera, y todavía queda margen por encima del tope) y otro con 3. Con dos
+#: por grupo el límite no se puede violar nunca y el control queda sin test.
 GRUPOS: dict[str, list[str]] = {
     "mercado": ["SPY"],
-    "tech": ["AAPL", "MSFT", "QQQ"],
-    "energia": ["XOM", "CVX"],
+    "tech": ["AAPL", "MSFT", "NVDA", "QQQ"],
+    "energia": ["XOM", "CVX", "COP"],
     "defensivo": ["JNJ", "PG"],
 }
 
@@ -141,9 +145,11 @@ CORRELATED_UNIVERSE: dict[str, dict] = {
     "SPY": {"start_price": 260.0, "drift": 0.00040, "volatility": 0.010},
     "AAPL": {"start_price": 120.0, "drift": 0.00060, "volatility": 0.016},
     "MSFT": {"start_price": 180.0, "drift": 0.00050, "volatility": 0.014},
+    "NVDA": {"start_price": 85.0, "drift": 0.00070, "volatility": 0.021},
     "QQQ": {"start_price": 150.0, "drift": 0.00050, "volatility": 0.013},
     "XOM": {"start_price": 65.0, "drift": 0.00025, "volatility": 0.015},
     "CVX": {"start_price": 95.0, "drift": 0.00028, "volatility": 0.014},
+    "COP": {"start_price": 55.0, "drift": 0.00026, "volatility": 0.017},
     "JNJ": {"start_price": 140.0, "drift": 0.00030, "volatility": 0.009},
     "PG": {"start_price": 110.0, "drift": 0.00030, "volatility": 0.008},
 }

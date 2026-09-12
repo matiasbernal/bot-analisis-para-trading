@@ -70,14 +70,20 @@ Hay **dos** universos sintéticos, y la diferencia importa:
 | Carpeta | Qué es | Para qué |
 |---|---|---|
 | `tests/fixtures/synthetic/` | 4 series **independientes** entre sí (ρ ≈ −0.01) | El universo de la tanda 1. Sus números están fijados en los tests. |
-| `tests/fixtures/correlated/` | 8 series **correlacionadas por grupos**: tech, energía, defensivo y el índice (ρ 0.85 intragrupo, 0.35 entre grupos, 0.70 contra SPY) | Todo lo que dependa de cómo se mueven juntas: heat de cartera, `max_per_group`, gaps simultáneos (tanda 2). |
+| `tests/fixtures/correlated/` | 10 series **correlacionadas por grupos**: tech (4), energía (3), defensivo (2) y el índice (ρ 0.85 intragrupo, 0.35 entre grupos, 0.70 contra SPY) | Todo lo que dependa de cómo se mueven juntas: heat de cartera, `max_per_group`, gaps simultáneos (tanda 2). |
 
-Por qué hacen falta los dos: sobre las series independientes, una cartera de
-cuatro símbolos muestra **la mitad** del drawdown de sus componentes, y esa
-reducción es puro artificio del generador. Sobre las correlacionadas muestra el
-86% del promedio, que es lo que pasa en el mercado real. Cualquier control de
-riesgo de cartera probado sobre las primeras se vería el doble de bueno de lo
-que es.
+Por qué hacen falta los dos: sobre las series independientes la volatilidad de
+la cartera es el **32%** de la de sus componentes (pura diversificación de
+ruido), contra **78%** en el universo correlacionado. El drawdown de la cartera
+correlacionada es **2.2×** el de la misma cartera sin correlación. Cualquier
+control de riesgo de cartera probado sobre las primeras se vería mucho mejor de
+lo que es.
+
+Los tamaños de grupo tampoco son casuales: con dos símbolos por sector,
+`max_per_group: 2` no se puede violar nunca y el control queda sin test. Con un
+grupo de 4 y otro de 3, el fixture produce 166 días-grupo con tres o más
+posiciones abiertas del mismo sector (32 con cuatro o más) sobre un cruce de
+medias corriente: eso es lo que la Fase 3 va a tener que rechazar.
 
 El sandbox donde se construyó esto no llega a Yahoo ni a Stooq. Los CSV reales
 los generás vos, una vez, y se commitean:
