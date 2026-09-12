@@ -33,7 +33,8 @@ METRIC_ROWS: list[tuple[str, str, str, bool]] = [
     ("total_return", "Retorno total", "pct", True),
     ("cagr", "CAGR", "pct", True),
     ("max_drawdown", "Max drawdown", "pct", True),
-    ("max_drawdown_days", "Duración MDD", "days", True),
+    ("deepest_drawdown_days", "Duración de ese DD", "days", True),
+    ("max_drawdown_days", "DD más largo", "days", True),
     ("sharpe", "Sharpe", "num", True),
     ("sortino", "Sortino", "num", True),
     ("calmar", "Calmar", "num", True),
@@ -141,6 +142,19 @@ def warnings_for(result: BacktestResult) -> list[dict[str, Any]]:
         )
 
     out.extend(_concentration_warning(result))
+
+    racha = int(result.metrics.get("max_consecutive_losses", 0))
+    if racha and n < 100:
+        out.append(
+            {
+                "strong": False,
+                "text": f"La racha de {racha} pérdidas seguidas "
+                f"(${result.metrics['worst_streak_money']:,.2f}) es UNA observación "
+                f"sobre {n} trades, no una estadística: no dice cuál es la racha "
+                "esperable, solo la que pasó. Con 100+ trades el número empieza a "
+                "significar algo.",
+            }
+        )
 
     strat = result.metrics["cagr"]
     bench = result.benchmark_metrics["cagr"]
@@ -370,6 +384,7 @@ def render_console(result: BacktestResult, manifest: dict | None = None) -> str:
     add(f"BACKTEST · {result.config.name}")
     add("=" * 64)
     add(f"Símbolos      : {', '.join(result.symbols)}")
+    add(f"Calibración   : {result.config.calibration.as_line()}")
     add(
         f"Período       : {result.equity.index[0]:%Y-%m-%d} → "
         f"{result.equity.index[-1]:%Y-%m-%d}  ({len(result.equity)} velas)"
@@ -540,6 +555,7 @@ def render_html(
     html = _environment().get_template("report.html").render(
         strategy=result.config,
         symbols=result.symbols,
+        calibration=result.config.calibration.as_line(),
         period={
             "start": result.equity.index[0].strftime("%Y-%m-%d"),
             "end": result.equity.index[-1].strftime("%Y-%m-%d"),

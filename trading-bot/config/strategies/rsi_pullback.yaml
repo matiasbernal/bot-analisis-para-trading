@@ -22,6 +22,11 @@ exits:
   hard_stop:   {mode: atr, multiple: 2.5, atr_period: 14}
   take_profit: {mode: rr,  ratio: 2.0}
 
+calibration:
+  version: 2
+  date: 2026-09-12
+  changed: max_position_pct 20 -> 30, por la misma razón que ema_cross.
+
 execution:
   signal_on:      close
   fill_on:        next_open

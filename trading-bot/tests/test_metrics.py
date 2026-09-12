@@ -26,6 +26,8 @@ import pytest
 from tradingbot.backtest.metrics import (
     cagr,
     compute_metrics,
+    deepest_drawdown_days,
+    drawdown_episodes,
     drawdown_series,
     expectancy_money,
     expectancy_r,
@@ -432,3 +434,93 @@ def test_costo_de_la_peor_racha_en_plata():
     ]
     assert max_consecutive_losses(trades) == 3
     assert worst_losing_streak_money(trades) == pytest.approx(-60.0)
+
+
+# --------------------------------------------------------------------------
+# Los dos drawdowns: el más largo y el más profundo pueden ser otro episodio
+# --------------------------------------------------------------------------
+def test_el_dd_mas_largo_y_el_mas_profundo_pueden_ser_distintos():
+    """Serie a mano con dos drawdowns: uno largo y poco profundo, otro corto y hondo.
+
+    Valores: 90 (01-01), 100 (01-02), 95 (02-01), 100 (02-11), 80 (02-12), 100 (02-21)
+
+      episodio A: pico 01-02 (100) → valle 02-01 (95, −5%) → recupera 02-11
+                  = 40 días corridos
+      episodio B: pico 02-11 (100) → valle 02-12 (80, −20%) → recupera 02-21
+                  = 10 días corridos
+
+    El más largo es A (40 días) y el más profundo es B (−20%, 10 días). Leer
+    "MDD −20%" al lado de "duración 40 d" mezcla dos episodios distintos.
+    """
+    fechas = pd.to_datetime(
+        ["2020-01-01", "2020-01-02", "2020-02-01", "2020-02-11", "2020-02-12", "2020-02-21"]
+    )
+    serie = pd.Series([90.0, 100.0, 95.0, 100.0, 80.0, 100.0], index=fechas)
+
+    episodios = drawdown_episodes(serie)
+    assert len(episodios) == 2
+
+    largo, profundo = episodios
+    assert largo["depth"] == pytest.approx(-0.05)
+    assert largo["days"] == 40
+    assert largo["peak_date"].strftime("%Y-%m-%d") == "2020-01-02"
+    assert largo["recovery_date"].strftime("%Y-%m-%d") == "2020-02-11"
+    assert profundo["depth"] == pytest.approx(-0.20)
+    assert profundo["days"] == 10
+
+    assert max_drawdown(serie) == pytest.approx(-0.20)
+    assert max_drawdown_days(serie) == 40        # el más largo
+    assert deepest_drawdown_days(serie) == 10    # el del MDD
+
+
+def test_los_episodios_traen_pico_valle_y_recuperacion(equity):
+    """Sobre la serie del archivo hay tres drawdowns; el primero es el hondo.
+
+    El −7.79% del pico de la barra 2, más dos rasguños después (el −2% de la
+    barra 9 y el −1% de la barra 13), que recuperan en dos y tres días.
+    """
+    episodios = drawdown_episodes(equity)
+    assert len(episodios) == 3
+    assert [round(e["depth"], 4) for e in episodios] == [-0.0779, -0.02, -0.01]
+    episodio = episodios[0]
+    assert episodio["peak_date"].strftime("%Y-%m-%d") == "2020-01-03"
+    assert episodio["trough_date"].strftime("%Y-%m-%d") == "2020-01-08"
+    assert episodio["recovery_date"].strftime("%Y-%m-%d") == "2020-01-13"
+    assert episodio["depth"] == pytest.approx(-0.077918, rel=1e-9)
+    assert episodio["days"] == 10
+
+
+def test_un_drawdown_que_no_recupera_se_cuenta_hasta_el_final():
+    serie = pd.Series(
+        [100.0, 90.0, 80.0, 85.0],
+        index=pd.DatetimeIndex(["2020-01-01", "2020-01-02", "2020-01-03", "2020-01-31"]),
+    )
+    episodios = drawdown_episodes(serie)
+    assert len(episodios) == 1
+    assert episodios[0]["recovery_date"].strftime("%Y-%m-%d") == "2020-01-31"
+    assert max_drawdown_days(serie) == 30
+    assert deepest_drawdown_days(serie) == 30
+
+
+def test_la_racha_se_reporta_como_observacion_unica():
+    """Con pocos trades, la peor racha es un dato, no una estadística."""
+    from types import SimpleNamespace
+
+    from tradingbot.reporting.report import warnings_for
+
+    equity = pd.Series(
+        [10_000.0, 10_100.0], index=pd.bdate_range("2020-01-01", periods=2)
+    )
+    pocos = [trade(-100, dia=i) for i in range(1, 6)] + [
+        trade(200, dia=i) for i in range(6, 26)
+    ]
+    resultado = SimpleNamespace(
+        metrics=compute_metrics(equity, pocos),
+        benchmark_metrics={"cagr": 0.0},
+        rule_trades=pocos,
+        config=None,
+    )
+    textos = " ".join(w["text"] for w in warnings_for(resultado))
+    assert "UNA observación" in textos
+    assert "25 trades" in textos
+    assert "-500.00" in textos  # el costo de la racha, en plata

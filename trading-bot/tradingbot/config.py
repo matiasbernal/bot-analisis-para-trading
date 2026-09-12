@@ -212,6 +212,37 @@ class BacktestConfig(BaseModel):
         return self
 
 
+class Calibration(BaseModel):
+    """Qué versión de esta estrategia es, y qué cambió respecto de la anterior.
+
+    Sin esto, dos informes de la misma plantilla con parámetros distintos se ven
+    iguales: mismo nombre, y la única diferencia es un fingerprint que nadie
+    compara de memoria. Subir ``version`` sin decir qué cambió no sirve, así que
+    es un error.
+    """
+
+    # el campo se llama `fecha` porque un campo llamado `date` taparía al tipo
+    # `date` al evaluar las anotaciones; en el YAML se escribe `date:`
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    version: int = Field(1, ge=1)
+    fecha: date | None = Field(None, alias="date")
+    changed: str = ""
+
+    @model_validator(mode="after")
+    def _exige_motivo(self) -> "Calibration":
+        if self.version > 1 and not self.changed.strip():
+            raise ValueError(
+                f"calibration: la versión {self.version} no dice qué cambió. "
+                "Poné 'changed' con el cambio respecto de la calibración anterior."
+            )
+        return self
+
+    def as_line(self) -> str:
+        cuando = f" ({self.fecha})" if self.fecha else ""
+        return f"v{self.version}{cuando}" + (f" · {self.changed}" if self.changed else "")
+
+
 class StrategyConfig(BaseModel):
     """El archivo de estrategia completo."""
 
@@ -228,6 +259,7 @@ class StrategyConfig(BaseModel):
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
+    calibration: Calibration = Field(default_factory=Calibration)
 
     #: ruta del archivo del que salió (no se serializa al manifiesto)
     source_path: Path | None = Field(default=None, exclude=True)

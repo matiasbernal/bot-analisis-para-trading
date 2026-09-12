@@ -27,6 +27,14 @@ exits:
   hard_stop:   {mode: atr, multiple: 2.0, atr_period: 14}
   take_profit: {mode: rr,  ratio: 3.0}
 
+calibration:
+  version: 2
+  date: 2026-09-12
+  changed: >-
+    max_position_pct 20 -> 30. Con 1.0/20 el tope decidía el tamaño en 21 de 31
+    trades y el riesgo real caía a 0.78R; con 1.0/30 vuelve a 0.95R y lo decide
+    risk_pct. Cambian todas las métricas respecto de la v1.
+
 execution:
   signal_on:      close          # la regla se evalúa con la vela CERRADA
   fill_on:        next_open      # la orden se ejecuta en la apertura siguiente

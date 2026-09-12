@@ -204,3 +204,61 @@ def test_el_aviso_es_aviso_y_no_error(tmp_path):
     )
     config = load_strategy(path)  # no levanta
     assert config.static_warnings()
+
+
+# --- registro de calibración ------------------------------------------------
+def test_la_calibracion_por_defecto_es_la_v1(tmp_path):
+    config = load_strategy(write(tmp_path))
+    assert config.calibration.version == 1
+    assert config.calibration.as_line() == "v1"
+
+
+def test_la_calibracion_se_lee_del_yaml(tmp_path):
+    path = write(
+        tmp_path,
+        calibration={"version": 3, "date": "2026-09-12", "changed": "stop 2 -> 2.5 ATR"},
+    )
+    calibracion = load_strategy(path).calibration
+    assert calibracion.version == 3
+    assert str(calibracion.fecha) == "2026-09-12"
+    assert calibracion.as_line() == "v3 (2026-09-12) · stop 2 -> 2.5 ATR"
+
+
+def test_subir_la_version_sin_decir_que_cambio_es_error(tmp_path):
+    """Una versión nueva sin motivo no registra nada: es exactamente el problema."""
+    path = write(tmp_path, calibration={"version": 2})
+    with pytest.raises(ConfigError, match="no dice qué cambió"):
+        load_strategy(path)
+
+
+def test_las_plantillas_del_repo_declaran_su_calibracion():
+    for template in sorted(STRATEGIES.glob("*.yaml")):
+        calibracion = load_strategy(template).calibration
+        if calibracion.version > 1:
+            assert calibracion.changed, f"{template.name} no dice qué cambió"
+            assert calibracion.fecha is not None
+
+
+def test_la_calibracion_va_al_manifiesto_y_al_informe(tmp_path):
+    """El registro no puede ser solo el fingerprint."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    from fixtures.synthetic import synthetic_universe
+
+    from tradingbot.backtest.engine import run_backtest
+    from tradingbot.backtest.manifest import build_manifest
+    from tradingbot.data.validate import validate_ohlcv
+    from tradingbot.reporting.report import render_console
+
+    config = load_strategy(STRATEGIES / "ema_cross.yaml")
+    frames = {
+        s: validate_ohlcv(df, s)
+        for s, df in synthetic_universe(config.universe).items()
+    }
+    result = run_backtest(config, frames)
+    manifest = build_manifest(config, frames, result.metrics)
+
+    assert manifest["strategy"]["calibration"]["version"] == 2
+    assert "max_position_pct" in manifest["strategy"]["calibration"]["changed"]
+    assert "Calibración   : v2" in render_console(result)

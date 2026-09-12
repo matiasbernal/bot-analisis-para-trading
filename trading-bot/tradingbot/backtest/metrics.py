@@ -74,19 +74,72 @@ def max_drawdown(equity: pd.Series) -> float:
     return float(drawdown_series(equity).min())
 
 
-def max_drawdown_days(equity: pd.Series) -> int:
-    """Días corridos del drawdown más largo (desde el pico hasta recuperarlo)."""
+def drawdown_episodes(equity: pd.Series) -> list[dict]:
+    """Cada drawdown por separado: pico, valle, recuperación, días y profundidad.
+
+    Un episodio va desde un máximo histórico hasta el día que ese máximo se
+    recupera, inclusive. El último queda abierto si la serie termina bajo el
+    agua, y ahí se cuenta hasta la última barra.
+    """
     if equity.empty:
-        return 0
-    peak_value = float(equity.iloc[0])
-    peak_date = equity.index[0]
-    worst = 0
-    for when, value in equity.items():
-        # el día que recupera el pico cierra el drawdown, y esa distancia cuenta
-        worst = max(worst, (when - peak_date).days)
+        return []
+
+    episodios: list[dict] = []
+    peak_value, peak_date = float(equity.iloc[0]), equity.index[0]
+    trough_value, trough_date = peak_value, peak_date
+    abierto = False
+
+    def cerrar(recovery_date):
+        episodios.append(
+            {
+                "peak_date": peak_date,
+                "peak": peak_value,
+                "trough_date": trough_date,
+                "trough": trough_value,
+                "recovery_date": recovery_date,
+                "days": int((recovery_date - peak_date).days),
+                "depth": trough_value / peak_value - 1.0,
+            }
+        )
+
+    for when, raw in equity.items():
+        value = float(raw)
         if value >= peak_value:
-            peak_value, peak_date = float(value), when
-    return int(worst)
+            if abierto:
+                cerrar(when)
+                abierto = False
+            peak_value, peak_date = value, when
+            trough_value, trough_date = value, when
+        else:
+            if not abierto:
+                abierto = True
+                trough_value, trough_date = value, when
+            elif value < trough_value:
+                trough_value, trough_date = value, when
+    if abierto:
+        cerrar(equity.index[-1])
+    return episodios
+
+
+def max_drawdown_days(equity: pd.Series) -> int:
+    """Días corridos del drawdown **más largo**: el récord de tiempo bajo el agua.
+
+    Ojo con leerlo pegado al ``max_drawdown``: el drawdown más largo y el más
+    profundo **pueden ser episodios distintos**, y sobre la plantilla actual lo
+    son (385 días el más largo, 371 el que llega a −5.51%). Por eso el informe
+    los muestra como dos filas separadas, con ``deepest_drawdown_days`` para la
+    duración del episodio más profundo.
+    """
+    episodios = drawdown_episodes(equity)
+    return max((e["days"] for e in episodios), default=0)
+
+
+def deepest_drawdown_days(equity: pd.Series) -> int:
+    """Días corridos del drawdown más **profundo**, que es el que mide el MDD."""
+    episodios = drawdown_episodes(equity)
+    if not episodios:
+        return 0
+    return int(min(episodios, key=lambda e: e["depth"])["days"])
 
 
 def profit_factor(trades: Sequence[Trade]) -> float:
@@ -282,6 +335,7 @@ def compute_metrics(
         "cagr": cagr_value,
         "max_drawdown": mdd,
         "max_drawdown_days": max_drawdown_days(equity),
+        "deepest_drawdown_days": deepest_drawdown_days(equity),
         "sharpe": sharpe(equity, periods_per_year),
         "sortino": sortino(equity, periods_per_year),
         "calmar": (cagr_value / abs(mdd)) if mdd < 0 else 0.0,
