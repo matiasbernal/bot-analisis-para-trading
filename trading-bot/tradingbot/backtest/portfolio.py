@@ -8,6 +8,7 @@ from datetime import date
 import pandas as pd
 
 from tradingbot.backtest.costs import CostModel
+from tradingbot.strategy.exits import REASON_EOD
 from tradingbot.strategy.position import Position
 
 
@@ -31,6 +32,16 @@ class Trade:
     mfe_r: float
     commission: float
     slippage: float
+
+    @property
+    def is_forced_close(self) -> bool:
+        """Se cerró porque se acabaron los datos, no porque una regla lo dijera.
+
+        No es una operación del sistema: no la decidió ninguna regla y es el
+        único fill del motor que ejecuta al cierre en vez de en la apertura
+        siguiente. Queda fuera de las estadísticas de trades y se reporta aparte.
+        """
+        return REASON_EOD in self.exit_reasons
 
     def as_row(self) -> dict:
         return {

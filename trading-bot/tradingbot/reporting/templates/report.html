@@ -61,6 +61,27 @@
   </table>
 </div>
 
+{% if open_positions %}
+<h2>Abiertas al cierre del período</h2>
+<p class="muted">
+  No las cerró ninguna regla: se valúan al último cierre disponible y quedan
+  fuera de las estadísticas de trades.
+</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Símbolo</th><th>R</th><th>P&amp;L</th><th>Entrada</th><th>Acciones</th><th>Valuada</th></tr></thead>
+    <tbody>
+    {% for p in open_positions %}
+      <tr>
+        <td>{{ p.symbol }}</td><td>{{ p.pnl_r }}</td><td>{{ p.pnl }}</td>
+        <td>{{ p.entry_date }}</td><td>{{ p.shares }}</td><td>{{ p.value }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 {% if in_out %}
 <h2>In-sample vs. out-of-sample</h2>
 <div class="table-wrap">

@@ -182,6 +182,31 @@ def _cards(result: BacktestResult) -> list[dict[str, str]]:
     return cards
 
 
+def open_positions_lines(result: BacktestResult) -> list[str]:
+    """Las posiciones que seguían abiertas cuando se acabaron los datos.
+
+    No entran en las estadísticas de trades (no las cerró ninguna regla y son el
+    único fill al cierre en vez de en la apertura siguiente), pero su plata está
+    en la equity final, así que se reportan aparte con nombre y apellido.
+    """
+    forced = result.forced_closes
+    if not forced:
+        return []
+    lines = [
+        "",
+        f"Posiciones abiertas al cierre del período: {len(forced)} "
+        "(fuera de las estadísticas de trades, valuadas al último cierre)",
+        "-" * 58,
+    ]
+    for trade in forced:
+        lines.append(
+            f"  {trade.symbol:<6} entrada {trade.entry_date} · {trade.shares} acciones · "
+            f"valuada ${trade.exit_price * trade.shares:,.0f} "
+            f"({trade.pnl:+,.0f} = {trade.pnl_r:+.2f}R)"
+        )
+    return lines
+
+
 def benchmark_header(result: BacktestResult) -> list[str]:
     """Qué es cada columna de benchmark. Sin esto no se sabe qué se compara."""
     lines = [
@@ -241,7 +266,7 @@ def render_console(result: BacktestResult, manifest: dict | None = None) -> str:
         f"slippage ${metrics['total_slippage']:,.2f}"
     )
 
-    breakdown = exit_breakdown(result.trades_frame)
+    breakdown = exit_breakdown(result.rule_trades_frame)
     if breakdown:
         add("")
         add("Salidas por regla")
@@ -253,7 +278,12 @@ def render_console(result: BacktestResult, manifest: dict | None = None) -> str:
                 f"{row['avg_pnl']:>14}{row['avg_r']:>10}"
             )
 
-    split = in_out_metrics(result.equity, result.trades, result.config.backtest.in_sample_end)
+    for line in open_positions_lines(result):
+        add(line)
+
+    split = in_out_metrics(
+        result.equity, result.rule_trades, result.config.backtest.in_sample_end
+    )
     if split:
         add("")
         add(f"In-sample / out-of-sample (corte {split['cut']})")
@@ -328,7 +358,9 @@ def render_html(
         if symbol in frames
     ]
 
-    split = in_out_metrics(result.equity, result.trades, result.config.backtest.in_sample_end)
+    split = in_out_metrics(
+        result.equity, result.rule_trades, result.config.backtest.in_sample_end
+    )
     in_out_rows = []
     if split:
         for label, key in (("in-sample", "in_sample"), ("out-of-sample", "out_of_sample")):
@@ -378,7 +410,18 @@ def render_html(
         benchmark_header=benchmark_header(result),
         warnings=warnings_for(result),
         charts={"equity": equity_html, "drawdown": drawdown_html, "prices": price_charts},
-        exit_breakdown=exit_breakdown(trades_frame),
+        exit_breakdown=exit_breakdown(result.rule_trades_frame),
+        open_positions=[
+            {
+                "symbol": t.symbol,
+                "entry_date": str(t.entry_date),
+                "shares": t.shares,
+                "value": f"${t.exit_price * t.shares:,.0f}",
+                "pnl": f"{t.pnl:+,.0f}",
+                "pnl_r": f"{t.pnl_r:+.2f}R",
+            }
+            for t in result.forced_closes
+        ],
         in_out=in_out_rows,
         trades=trades_rows,
         rejections=[

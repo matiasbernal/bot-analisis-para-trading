@@ -89,8 +89,26 @@ class BacktestResult:
 
     @property
     def trades_frame(self) -> pd.DataFrame:
+        return self._frame(self.trades)
+
+    @property
+    def rule_trades(self) -> list[Trade]:
+        """Los trades que cerró una regla del sistema. Son los que se miden."""
+        return [t for t in self.trades if not t.is_forced_close]
+
+    @property
+    def forced_closes(self) -> list[Trade]:
+        """Posiciones que seguían abiertas cuando se acabaron los datos."""
+        return [t for t in self.trades if t.is_forced_close]
+
+    @property
+    def rule_trades_frame(self) -> pd.DataFrame:
+        return self._frame(self.rule_trades)
+
+    @staticmethod
+    def _frame(trades: list[Trade]) -> pd.DataFrame:
         portfolio = Portfolio(initial_cash=1.0)
-        portfolio.trades = self.trades
+        portfolio.trades = trades
         return portfolio.trades_frame()
 
 
@@ -376,6 +394,18 @@ def run_backtest(
         else:
             spy_note = spy_note or "SPY no tiene velas en el rango del backtest"
 
+    # Las estadísticas de trades se calculan sobre los que cerró una regla: el
+    # cierre forzado por fin de datos no es una operación del sistema y mete
+    # ruido en win rate, expectancy y profit factor. Los costos sí se suman
+    # sobre todos, porque esa plata se pagó igual.
+    rule_trades = [t for t in portfolio.trades if not t.is_forced_close]
+    forced = [t for t in portfolio.trades if t.is_forced_close]
+    metrics = compute_metrics(equity, rule_trades, exposure=exposure_series)
+    metrics["total_commission"] = float(sum(t.commission for t in portfolio.trades))
+    metrics["total_slippage"] = float(sum(t.slippage for t in portfolio.trades))
+    metrics["open_at_end"] = len(forced)
+    metrics["open_at_end_pnl"] = float(sum(t.pnl for t in forced))
+
     return BacktestResult(
         config=config,
         equity=equity,
@@ -383,7 +413,7 @@ def run_backtest(
         trades=portfolio.trades,
         rejections=portfolio.rejections,
         exposure=exposure_series,
-        metrics=compute_metrics(equity, portfolio.trades, exposure=exposure_series),
+        metrics=metrics,
         benchmark_metrics=compute_metrics(benchmark),
         symbols=sorted(sliced),
         spy=spy_series,
