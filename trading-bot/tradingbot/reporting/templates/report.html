@@ -17,13 +17,17 @@
   {% endfor %}
 {% endif %}
 
-<h2>Estrategia vs. buy &amp; hold</h2>
+<h2>Estrategia vs. buy &amp; hold vs. SPY</h2>
+<p class="muted">
+  {% for line in benchmark_header %}{{ line }}<br>{% endfor %}
+</p>
 <section class="cards">
   {% for card in cards %}
   <div class="card">
     <span class="label">{{ card.label }}</span>
     <span class="value {{ card.klass }}">{{ card.value }}</span>
     {% if card.bench %}<span class="bench">B&amp;H: {{ card.bench }}</span>{% endif %}
+    {% if card.spy %}<span class="bench">SPY: {{ card.spy }}</span>{% endif %}
   </div>
   {% endfor %}
 </section>

@@ -171,10 +171,32 @@ def _cards(result: BacktestResult) -> list[dict[str, str]]:
                     if compare and key in result.benchmark_metrics
                     else ""
                 ),
+                "spy": (
+                    _fmt(result.spy_metrics.get(key), kind)
+                    if compare and result.spy_metrics and key in result.spy_metrics
+                    else ""
+                ),
                 "klass": _klass(key, value),
             }
         )
     return cards
+
+
+def benchmark_header(result: BacktestResult) -> list[str]:
+    """Qué es cada columna de benchmark. Sin esto no se sabe qué se compara."""
+    lines = [
+        f"Buy & hold    : cartera equiponderada de {len(result.symbols)} símbolos "
+        f"({', '.join(result.symbols)}), "
+        f"${result.metrics['initial_equity'] / max(len(result.symbols), 1):,.0f} en cada uno"
+    ]
+    if result.spy_metrics is not None:
+        nota = f"SPY           : buy & hold de SPY · {result.spy_note}"
+        if result.spy_in_universe:
+            nota += "\n                SPY está en el universo: cuenta en las dos columnas"
+        lines.append(nota)
+    else:
+        lines.append(f"SPY           : SIN REFERENCIA DE MERCADO · {result.spy_note}")
+    return lines
 
 
 # --- consola ---------------------------------------------------------------
@@ -201,12 +223,17 @@ def render_console(result: BacktestResult, manifest: dict | None = None) -> str:
         f"({result.config.execution.fill_on})"
     )
     add("")
-    add(f"{'Métrica':<26}{'Estrategia':>16}{'Buy & hold':>16}")
-    add("-" * 58)
+    for line in benchmark_header(result):
+        add(line)
+    add("")
+    add(f"{'Métrica':<26}{'Estrategia':>16}{'Buy & hold':>16}{'SPY':>16}")
+    add("-" * 74)
+    spy = result.spy_metrics or {}
     for key, label, kind, compare in METRIC_ROWS:
         left = _fmt(metrics.get(key), kind)
         right = _fmt(bench.get(key), kind) if compare and key in bench else ""
-        add(f"{label:<26}{left:>16}{right:>16}")
+        tercera = _fmt(spy.get(key), kind) if compare and key in spy else ""
+        add(f"{label:<26}{left:>16}{right:>16}{tercera:>16}")
     add("")
     add(f"Fiabilidad    : {metrics['reliability']} ({metrics['n_trades']} trades)")
     add(
@@ -289,7 +316,7 @@ def render_html(
     include_first: str | bool = "inline" if plotly == "inline" else "cdn"
 
     equity_html = charts_mod.equity_chart(
-        result.equity, result.benchmark, include_js=include_first
+        result.equity, result.benchmark, result.spy, include_js=include_first
     )
     drawdown_html = charts_mod.drawdown_chart(result.equity)
     price_charts = [
@@ -348,6 +375,7 @@ def render_html(
         },
         metrics=result.metrics,
         cards=_cards(result),
+        benchmark_header=benchmark_header(result),
         warnings=warnings_for(result),
         charts={"equity": equity_html, "drawdown": drawdown_html, "prices": price_charts},
         exit_breakdown=exit_breakdown(trades_frame),

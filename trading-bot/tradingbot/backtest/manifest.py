@@ -46,8 +46,14 @@ def build_manifest(
     frames: dict[str, pd.DataFrame],
     metrics: dict[str, Any],
     *,
+    providers: dict[str, str] | None = None,
     repo_dir: str | Path | None = None,
 ) -> dict[str, Any]:
+    """``providers`` dice de dónde vino cada serie (Yahoo, Stooq, CSV, sintética).
+
+    Sin eso el manifiesto no distingue un backtest sobre datos reales de uno
+    sobre fixtures, que es exactamente la confusión que hay que evitar.
+    """
     payload: dict[str, Any] = {
         "tradingbot_version": __version__,
         "code_commit": code_commit(repo_dir),
@@ -55,6 +61,7 @@ def build_manifest(
         "data": {
             "symbols": sorted(frames),
             "hash": dataset_hash(frames),
+            "providers": {s: (providers or {}).get(s, "desconocido") for s in sorted(frames)},
             "bars": {s: int(len(frames[s])) for s in sorted(frames)},
             "first_bar": min(df.index[0] for df in frames.values()).strftime("%Y-%m-%d"),
             "last_bar": max(df.index[-1] for df in frames.values()).strftime("%Y-%m-%d"),

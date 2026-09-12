@@ -42,9 +42,13 @@ def _fragment(fig: go.Figure, *, include_js: bool, div_id: str) -> str:
 
 
 def equity_chart(
-    equity: pd.Series, benchmark: pd.Series, *, include_js: str | bool = False
+    equity: pd.Series,
+    benchmark: pd.Series,
+    spy: pd.Series | None = None,
+    *,
+    include_js: str | bool = False,
 ) -> str:
-    """Curva de equity de la estrategia contra buy & hold."""
+    """Curva de equity de la estrategia contra buy & hold y contra SPY."""
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(x=equity.index, y=equity.to_numpy(), name="Estrategia", mode="lines")
@@ -58,6 +62,16 @@ def equity_chart(
             line=dict(dash="dot"),
         )
     )
+    if spy is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=spy.index,
+                y=spy.to_numpy(),
+                name="SPY",
+                mode="lines",
+                line=dict(dash="dash"),
+            )
+        )
     fig.update_layout(**_LAYOUT, yaxis_title="Equity")
     return _fragment(fig, include_js=include_js, div_id="chart-equity")
 

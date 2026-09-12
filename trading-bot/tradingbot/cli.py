@@ -46,6 +46,36 @@ def _provider(data_dir: Optional[Path], settings_path: Optional[Path]):
     return provider, ParquetCache(settings.cache_dir, provider)
 
 
+SPY = "SPY"
+
+
+def _source_label(provider, symbol: str) -> str:
+    """De dónde salió una serie, para que el informe no mienta sobre sus datos."""
+    if isinstance(provider, LocalCsvProvider):
+        try:
+            path = provider.path_for(symbol)
+        except DataValidationError:
+            return provider.name
+        if path.parent.name == "synthetic":
+            return f"serie SINTÉTICA ({path})"
+        return f"CSV local ({path})"
+    return provider.name
+
+
+def _providers(provider, frames: dict) -> dict[str, str]:
+    return {sym: _source_label(provider, sym) for sym in sorted(frames)}
+
+
+def _load_spy(frames: dict, load, provider) -> tuple[object | None, str]:
+    """La serie de SPY para el benchmark de mercado, con su rótulo o su motivo."""
+    if SPY in frames:
+        return frames[SPY], f"{_source_label(provider, SPY)} · ya está en el universo"
+    try:
+        return load(SPY), _source_label(provider, SPY)
+    except Exception as exc:  # noqa: BLE001 - el motivo se imprime, no se traga
+        return None, f"no se pudo cargar: {exc}"
+
+
 @app.command()
 def backtest(
     strategy: Path = typer.Option(..., "--strategy", "-s", help="YAML de estrategia."),
@@ -77,24 +107,26 @@ def backtest(
     universe = [s.upper() for s in symbol] if symbol else config.universe
     provider, cache = _provider(data, settings)
 
+    def load(sym: str):
+        if cache is not None:
+            return cache.get(
+                sym,
+                start=config.backtest.start,
+                end=config.backtest.end,
+                interval=config.interval,
+                offline=offline,
+            )
+        return provider.get_ohlcv(
+            sym,
+            start=config.backtest.start,
+            end=config.backtest.end,
+            interval=config.interval,
+        )
+
     frames = {}
     for sym in universe:
         try:
-            if cache is not None:
-                frames[sym] = cache.get(
-                    sym,
-                    start=config.backtest.start,
-                    end=config.backtest.end,
-                    interval=config.interval,
-                    offline=offline,
-                )
-            else:
-                frames[sym] = provider.get_ohlcv(
-                    sym,
-                    start=config.backtest.start,
-                    end=config.backtest.end,
-                    interval=config.interval,
-                )
+            frames[sym] = load(sym)
         except DataValidationError as exc:
             typer.secho(f"  ! {sym}: {exc}", fg=typer.colors.YELLOW, err=True)
 
@@ -104,8 +136,12 @@ def backtest(
         )
         raise typer.Exit(code=1)
 
-    result = run_backtest(config, frames)
-    manifest = build_manifest(config, frames, result.metrics)
+    # SPY se descarga siempre, esté o no en el universo: la regla de rigor 5
+    # pide comparar contra el mercado, no solo contra el propio universo
+    spy_frame, spy_note = _load_spy(frames, load, provider)
+
+    result = run_backtest(config, frames, spy_frame=spy_frame, spy_note=spy_note)
+    manifest = build_manifest(config, frames, result.metrics, providers=_providers(provider, frames))
     result.data_hash = manifest["data"]["hash"]
     result.manifest = manifest
 

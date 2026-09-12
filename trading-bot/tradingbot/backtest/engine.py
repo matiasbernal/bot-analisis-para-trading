@@ -75,6 +75,15 @@ class BacktestResult:
     metrics: dict
     benchmark_metrics: dict
     symbols: list[str]
+    #: buy & hold de SPY: la referencia de mercado que exige la regla de rigor 5
+    spy: pd.Series | None = None
+    spy_metrics: dict | None = None
+    #: de dónde salió la serie de SPY, o por qué no está
+    spy_note: str = ""
+    #: SPY forma parte del universo, así que está contado dos veces
+    spy_in_universe: bool = False
+    #: el rango pedido en el YAML, cuando los datos no llegan a cubrirlo
+    period_requested: tuple[str, str] | None = None
     data_hash: str = ""
     manifest: dict = field(default_factory=dict)
 
@@ -134,8 +143,15 @@ def run_backtest(
     frames: dict[str, pd.DataFrame],
     *,
     lookahead: bool = False,
+    spy_frame: pd.DataFrame | None = None,
+    spy_note: str = "",
 ) -> BacktestResult:
-    """Corre el backtest sobre las series ya validadas de cada símbolo."""
+    """Corre el backtest sobre las series ya validadas de cada símbolo.
+
+    ``spy_frame`` es la serie de SPY para el benchmark de mercado. Si no se
+    pasa, el informe lo dice en vez de omitir la columna en silencio; el motivo
+    va en ``spy_note``.
+    """
     if not frames:
         raise ValueError("no hay datos para ningún símbolo del universo")
 
@@ -332,13 +348,33 @@ def run_backtest(
 
     equity = portfolio.equity_curve()
     exposure_series = pd.Series(exposure, index=index, name="exposure")
+    bench_start = index[min(config.warmup_bars, len(index) - 1)]
     benchmark = buy_and_hold(
         sliced,
         initial_cash=config.backtest.initial_cash,
         costs=costs,
         index=index,
-        start=index[min(config.warmup_bars, len(index) - 1)],
+        start=bench_start,
     )
+
+    spy_series = spy_metrics = None
+    if spy_frame is not None and not spy_frame.empty:
+        spy_sliced = spy_frame
+        if start is not None:
+            spy_sliced = spy_sliced[spy_sliced.index >= start]
+        if end is not None:
+            spy_sliced = spy_sliced[spy_sliced.index <= end]
+        if not spy_sliced.empty:
+            spy_series = buy_and_hold(
+                {"SPY": spy_sliced},
+                initial_cash=config.backtest.initial_cash,
+                costs=costs,
+                index=index,
+                start=bench_start,
+            ).rename("spy")
+            spy_metrics = compute_metrics(spy_series)
+        else:
+            spy_note = spy_note or "SPY no tiene velas en el rango del backtest"
 
     return BacktestResult(
         config=config,
@@ -350,4 +386,12 @@ def run_backtest(
         metrics=compute_metrics(equity, portfolio.trades, exposure=exposure_series),
         benchmark_metrics=compute_metrics(benchmark),
         symbols=sorted(sliced),
+        spy=spy_series,
+        spy_metrics=spy_metrics,
+        spy_note=spy_note,
+        spy_in_universe="SPY" in sliced,
+        period_requested=(
+            str(config.backtest.start) if config.backtest.start else "",
+            str(config.backtest.end) if config.backtest.end else "",
+        ),
     )
