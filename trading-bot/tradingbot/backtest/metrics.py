@@ -127,12 +127,21 @@ def max_consecutive_losses(trades: Sequence[Trade]) -> int:
 
 
 def top_trades_concentration(trades: Sequence[Trade], top: int = 5) -> float:
-    """Qué fracción del P&L total viene de los ``top`` mejores trades."""
-    total = sum(t.pnl for t in trades)
-    if not trades or total <= 0:
+    """Qué fracción de la **ganancia bruta** aportan los ``top`` mejores ganadores.
+
+    El denominador es la suma de los trades ganadores, no el P&L neto. Dividir
+    por el neto da números imposibles de leer (252% cuando el neto es chico y
+    los ganadores no lo son) y se rompe del todo si el neto es negativo. Con la
+    ganancia bruta el número vive siempre entre 0 y 1 y responde la pregunta que
+    importa: si da 0.80, cuatro quintos de todo lo que ganaste salió de cinco
+    operaciones y el resto del sistema no aporta.
+
+    Con 5 ganadores o menos da exactamente 1.0, que es la respuesta correcta.
+    """
+    wins = sorted((t.pnl for t in trades if t.pnl > 0), reverse=True)
+    if not wins:
         return float("nan")
-    best = sorted((t.pnl for t in trades), reverse=True)[:top]
-    return float(sum(best) / total)
+    return float(sum(wins[:top]) / sum(wins))
 
 
 def reliability(n_trades: int) -> str:
@@ -151,7 +160,14 @@ def compute_metrics(
     exposure: pd.Series | None = None,
     periods_per_year: int = PERIODS_PER_YEAR,
 ) -> dict[str, float | int | str]:
-    """Todas las métricas de una curva de equity y su lista de trades."""
+    """Todas las métricas de una curva de equity y su lista de trades.
+
+    ``exposure`` es la cantidad de posiciones abiertas en cada barra. De ahí sale
+    ``exposure_pct``, que mide **la fracción de días con al menos una posición
+    abierta**, sin ponderar por cuántas ni por cuánto capital ocupan: con cuatro
+    símbolos, un día con una posición y un día con cuatro cuentan igual. La
+    exposición media ponderada por capital es otra métrica y no está acá.
+    """
     trades = list(trades)
     equity = equity.astype("float64")
     mdd = max_drawdown(equity)

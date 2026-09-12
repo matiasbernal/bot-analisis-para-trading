@@ -61,12 +61,12 @@
 <h2>In-sample vs. out-of-sample</h2>
 <div class="table-wrap">
   <table>
-    <thead><tr><th>Tramo</th><th>CAGR</th><th>MDD</th><th>Trades</th><th>Expectancy</th></tr></thead>
+    <thead><tr><th>Tramo</th><th>CAGR</th><th>MDD</th><th>Trades</th><th>Expectancy</th><th>Fiabilidad</th></tr></thead>
     <tbody>
       {% for row in in_out %}
       <tr>
         <td>{{ row.label }}</td><td>{{ row.cagr }}</td><td>{{ row.mdd }}</td>
-        <td>{{ row.n }}</td><td>{{ row.expectancy }}</td>
+        <td>{{ row.n }}</td><td>{{ row.expectancy }}</td><td>{{ row.reliability }}</td>
       </tr>
       {% endfor %}
     </tbody>

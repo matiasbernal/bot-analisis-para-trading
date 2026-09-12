@@ -39,8 +39,8 @@ METRIC_ROWS: list[tuple[str, str, str, bool]] = [
     ("win_loss_ratio", "Ganancia/pérdida media", "num", False),
     ("n_trades", "Trades", "int", False),
     ("max_consecutive_losses", "Racha de pérdidas", "int", False),
-    ("top5_concentration", "P&L de los 5 mejores", "pct", False),
-    ("exposure_pct", "Tiempo en mercado", "pct", False),
+    ("top5_concentration", "Ganancia de los 5 mejores", "pct", False),
+    ("exposure_pct", "Días con posición", "pct", False),
 ]
 
 
@@ -131,8 +131,9 @@ def warnings_for(result: BacktestResult) -> list[dict[str, Any]]:
         out.append(
             {
                 "strong": False,
-                "text": f"El {concentration * 100:.0f}% del P&L viene de los 5 mejores trades: "
-                "el resultado depende de un puñado de operaciones, no del sistema.",
+                "text": f"El {concentration * 100:.0f}% de la ganancia bruta sale de los 5 "
+                "mejores trades: el resultado depende de un puñado de operaciones, "
+                "no del sistema.",
             }
         )
 
@@ -230,12 +231,15 @@ def render_console(result: BacktestResult, manifest: dict | None = None) -> str:
         add("")
         add(f"In-sample / out-of-sample (corte {split['cut']})")
         add("-" * 58)
-        add(f"{'Tramo':<20}{'CAGR':>12}{'MDD':>12}{'Trades':>8}{'Expect.':>10}")
+        # el semáforo va por tramo: cada mitad tiene menos trades que el total,
+        # y sin el aviso al lado la tabla invita a leer la expectancy como si
+        # significara algo
+        add(f"{'Tramo':<18}{'CAGR':>11}{'MDD':>11}{'Trades':>8}{'Expect.':>10}{'Fiabilidad':>14}")
         for label, key in (("in-sample", "in_sample"), ("out-of-sample", "out_of_sample")):
             m = split[key]
             add(
-                f"{label:<20}{_fmt(m['cagr'], 'pct'):>12}{_fmt(m['max_drawdown'], 'pct'):>12}"
-                f"{m['n_trades']:>8}{_fmt(m['expectancy_r'], 'r'):>10}"
+                f"{label:<18}{_fmt(m['cagr'], 'pct'):>11}{_fmt(m['max_drawdown'], 'pct'):>11}"
+                f"{m['n_trades']:>8}{_fmt(m['expectancy_r'], 'r'):>10}{m['reliability']:>14}"
             )
 
     for warning in warnings_for(result):
@@ -309,6 +313,7 @@ def render_html(
                     "mdd": _fmt(m["max_drawdown"], "pct"),
                     "n": m["n_trades"],
                     "expectancy": _fmt(m["expectancy_r"], "r"),
+                    "reliability": m["reliability"],
                 }
             )
 
