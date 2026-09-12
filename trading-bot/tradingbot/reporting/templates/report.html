@@ -62,6 +62,13 @@
   </table>
 </div>
 
+{% if risk_unit %}
+<h2>Unidad de riesgo</h2>
+<div class="banner">
+  {% for line in risk_unit %}{{ line }}<br>{% endfor %}
+</div>
+{% endif %}
+
 {% if open_positions %}
 <h2>Abiertas al cierre del período</h2>
 <p class="muted">

@@ -275,6 +275,21 @@ lo que evita que cinco operaciones correlacionadas se conviertan en una sola apu
 El backtest respeta estos límites igual que el `scan`, así que los resultados históricos
 reflejan las señales que **realmente** habrías podido tomar, no todas las que aparecieron.
 
+> **Corrección de la tanda 1 — cómo se calcula el heat.** Al cerrar la tanda 1 se midió
+> que el riesgo realizado de cada trade no es 1R: va de 0.54R a 0.99R (media 0.78R), porque
+> el tamaño se redondea a acciones enteras y el tope de concentración recorta posiciones.
+> Por eso `max_portfolio_heat_r` **no se evalúa contando R nominales** sino en pesos:
+>
+> ```
+> heat = Σ(riesgo real de las posiciones abiertas) / equity      riesgo real = acciones × (entrada − stop)
+> ```
+>
+> con `max_portfolio_heat_r: 4.0` leído como "4% del equity en riesgo abierto". Contar
+> "cuatro posiciones de 1R" daría 4R nominales que en la práctica son ~3.1R, y el
+> cortacircuito quedaría calibrado sobre una unidad que no es la que dice. Lo mismo vale
+> para el riesgo que muestra la alerta de Telegram y para cualquier lectura en R de las
+> rachas. Detalle y números en `README.md`, sección "La unidad de riesgo (1R)".
+
 ---
 
 ## Gestión de la posición abierta

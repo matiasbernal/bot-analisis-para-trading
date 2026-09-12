@@ -98,9 +98,45 @@ def profit_factor(trades: Sequence[Trade]) -> float:
 
 
 def expectancy_r(trades: Sequence[Trade]) -> float:
+    """Expectancy del plan: media de ``pnl_r``. "Cuánto deja un trade típico".
+
+    Cada trade pesa igual, que es lo que se quiere para juzgar la regla. Ojo con
+    traducirla a plata multiplicando por el 1R declarado: el R realizado varía
+    entre trades (ver ``return_on_risk`` y ``expectancy_money``).
+    """
     if not trades:
         return 0.0
     return float(np.mean([t.pnl_r for t in trades]))
+
+
+def expectancy_money(trades: Sequence[Trade]) -> float:
+    """Expectancy en pesos: media de ``pnl``. Es el número que no se malinterpreta."""
+    if not trades:
+        return 0.0
+    return float(np.mean([t.pnl for t in trades]))
+
+
+def return_on_risk(trades: Sequence[Trade]) -> float:
+    """Retorno sobre riesgo desplegado: ``Σ pnl / Σ riesgo real``.
+
+    **No es la expectancy** y no la reemplaza. La expectancy pondera cada trade
+    igual; esta pondera cada trade por la plata que puso en juego, así que
+    responde otra pregunta: cuánto devolvió cada peso arriesgado. Es la unidad
+    correcta para el heat de cartera de la Fase 3, que se calcula sobre riesgo
+    en pesos y no contando R nominales.
+
+    Con R constante entre trades las dos coinciden; cuanto más dispersa es la R
+    realizada, más se separan.
+    """
+    riesgo = sum(t.risk_amount for t in trades)
+    if riesgo <= 0:
+        return 0.0
+    return float(sum(t.pnl for t in trades) / riesgo)
+
+
+def risk_deployed(trades: Sequence[Trade]) -> float:
+    """Suma del riesgo real de todos los trades, en pesos."""
+    return float(sum(t.risk_amount for t in trades))
 
 
 def win_rate(trades: Sequence[Trade]) -> float:
@@ -124,6 +160,23 @@ def max_consecutive_losses(trades: Sequence[Trade]) -> int:
         run = run + 1 if trade.pnl < 0 else 0
         worst = max(worst, run)
     return worst
+
+
+def worst_losing_streak_money(trades: Sequence[Trade]) -> float:
+    """Cuánta plata costó la peor racha de pérdidas seguidas.
+
+    La racha se cuenta en trades, no en R: multiplicar la cantidad por el 1R
+    declarado infla el número, porque el R realizado de cada trade es menor
+    (ver README, "La unidad de riesgo"). Acá va la plata, que no miente.
+    """
+    peor = acumulado = 0.0
+    for trade in sorted(trades, key=lambda t: (t.exit_date, t.symbol)):
+        if trade.pnl < 0:
+            acumulado += trade.pnl
+            peor = min(peor, acumulado)
+        else:
+            acumulado = 0.0
+    return float(peor)
 
 
 def top_trades_concentration(trades: Sequence[Trade], top: int = 5) -> float:
@@ -188,10 +241,17 @@ def compute_metrics(
         "profit_factor": profit_factor(trades),
         "win_rate": win_rate(trades),
         "expectancy_r": expectancy_r(trades),
+        "expectancy_money": expectancy_money(trades),
+        "return_on_risk": return_on_risk(trades),
+        "risk_deployed": risk_deployed(trades),
+        "avg_risk_amount": (
+            risk_deployed(trades) / len(trades) if trades else 0.0
+        ),
         "win_loss_ratio": win_loss_ratio(trades),
         "n_trades": len(trades),
         "reliability": reliability(len(trades)),
         "max_consecutive_losses": max_consecutive_losses(trades),
+        "worst_streak_money": worst_losing_streak_money(trades),
         "top5_concentration": top_trades_concentration(trades),
         "avg_bars_held": float(np.mean([t.bars_held for t in trades])) if trades else 0.0,
         "total_commission": float(sum(t.commission for t in trades)),

@@ -36,9 +36,13 @@ METRIC_ROWS: list[tuple[str, str, str, bool]] = [
     ("profit_factor", "Profit factor", "num", False),
     ("win_rate", "Win rate", "pct", False),
     ("expectancy_r", "Expectancy", "r", False),
+    ("expectancy_money", "Expectancy en plata", "money_signed", False),
+    ("return_on_risk", "Retorno s/ riesgo desplegado", "pct", False),
+    ("avg_risk_amount", "Riesgo real medio (1R)", "money2", False),
     ("win_loss_ratio", "Ganancia/pérdida media", "num", False),
     ("n_trades", "Trades", "int", False),
     ("max_consecutive_losses", "Racha de pérdidas", "int", False),
+    ("worst_streak_money", "Costo de la peor racha", "money_signed", False),
     ("top5_concentration", "5 mejores / ganancia bruta", "pct", False),
     ("exposure_pct", "Días con posición", "pct", False),
 ]
@@ -56,6 +60,10 @@ def _fmt(value: Any, kind: str) -> str:
         return f"{value * 100:.2f}%"
     if kind == "money":
         return f"${value:,.0f}"
+    if kind == "money2":
+        return f"${value:,.2f}"
+    if kind == "money_signed":
+        return f"${value:+,.2f}"
     if kind == "num":
         return f"{value:.2f}"
     if kind == "r":
@@ -182,6 +190,52 @@ def _cards(result: BacktestResult) -> list[dict[str, str]]:
     return cards
 
 
+def risk_unit_lines(result: BacktestResult) -> list[str]:
+    """Qué vale 1R de verdad, y cuánto se equivoca leer la expectancy en plata.
+
+    El plan define la expectancy como la media de ``pnl_r`` y así se usa
+    mentalmente: "cuánto deja un trade típico". El problema es traducirla a plata
+    multiplicando por el 1R declarado, porque el R realizado es más chico. Este
+    bloque pone los dos números uno al lado del otro para que la traducción no
+    se haga a ojo.
+    """
+    trades = result.rule_trades
+    if not trades:
+        return []
+    declarado = sum(t.risk_target for t in trades) / len(trades)
+    real = sum(t.risk_amount for t in trades) / len(trades)
+    expectancy = float(result.metrics["expectancy_r"])
+    en_plata = float(result.metrics["expectancy_money"])
+
+    riesgo_pct = result.config.risk.position_sizing.risk_pct
+    ancho = 48
+    lines = [
+        "",
+        "Unidad de riesgo",
+        "-" * 58,
+        f"  {f'1R declarado por el YAML (risk_pct {riesgo_pct}%)':<{ancho}}${declarado:,.2f}",
+        f"  {'1R realizado (acciones × riesgo por acción)':<{ancho}}${real:,.2f}"
+        + (f"   ({real / declarado:.2f}× del declarado)" if declarado else ""),
+        f"  {'Expectancy (media de pnl_r)':<{ancho}}{expectancy:+.2f}R",
+        f"  {'Expectancy en plata (media de pnl)':<{ancho}}${en_plata:+,.2f}",
+        f"  {'Retorno sobre riesgo desplegado (Σpnl/Σriesgo)':<{ancho}}"
+        f"{result.metrics['return_on_risk'] * 100:+.2f}%",
+    ]
+
+    ingenua = expectancy * declarado
+    if declarado and abs(ingenua - en_plata) > 0.01 * max(abs(en_plata), 1.0):
+        error = abs(ingenua / en_plata - 1) * 100 if en_plata else float("inf")
+        lines.append(
+            f"  OJO: leer la expectancy como '{expectancy:+.2f}R × ${declarado:,.2f}' da "
+            f"${ingenua:+,.2f} por trade,"
+        )
+        lines.append(
+            f"       y el promedio real es ${en_plata:+,.2f}. Esa lectura se equivoca "
+            f"{error:.0f}%."
+        )
+    return lines
+
+
 def period_note(result: BacktestResult) -> str:
     """Aviso cuando los datos no cubren el rango que pide el YAML.
 
@@ -304,6 +358,9 @@ def render_console(result: BacktestResult, manifest: dict | None = None) -> str:
                 f"{row['reason']:<20}{row['count']:>8}{row['pct']:>6}"
                 f"{row['avg_pnl']:>14}{row['avg_r']:>10}"
             )
+
+    for line in risk_unit_lines(result):
+        add(line)
 
     for line in open_positions_lines(result):
         add(line)
@@ -439,6 +496,7 @@ def render_html(
         warnings=warnings_for(result),
         charts={"equity": equity_html, "drawdown": drawdown_html, "prices": price_charts},
         exit_breakdown=exit_breakdown(result.rule_trades_frame),
+        risk_unit=risk_unit_lines(result)[3:],
         open_positions=[
             {
                 "symbol": t.symbol,

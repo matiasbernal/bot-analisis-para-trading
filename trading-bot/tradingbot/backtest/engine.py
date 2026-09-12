@@ -42,6 +42,7 @@ class PendingOrder:
     execute_on: pd.Timestamp
     shares: int = 0
     risk_per_share: float = 0.0
+    risk_target: float = 0.0
     reasons: list[str] = field(default_factory=list)
 
 
@@ -219,6 +220,7 @@ def run_backtest(
     entry_bar: dict[str, int] = {}
     opened_today: set[str] = set()
     exposure: list[int] = []
+    sizing_counts: dict[str, int] = {"riesgo": 0, "tope": 0, "cash": 0}
 
     for when in index:
         opened_today.clear()
@@ -249,6 +251,7 @@ def run_backtest(
                     shares=order.shares,
                     risk_per_share=order.risk_per_share,
                     target_ratio=target_ratio,
+                    risk_target=order.risk_target,
                 )
                 if position is not None:
                     entry_bar[symbol] = i
@@ -344,12 +347,20 @@ def run_backtest(
                 portfolio.rejections.append(Rejection(when.date(), symbol, result.reason))
                 continue
 
+            # quién decidió el tamaño: si no fue el riesgo, risk_pct es decorativo
+            sizing_counts[
+                "tope" if "max_position_pct" in result.reason
+                else "cash" if "cash" in result.reason
+                else "riesgo"
+            ] += 1
+
             pending[symbol] = PendingOrder(
                 symbol=symbol,
                 side="buy",
                 execute_on=next_date,
                 shares=result.shares,
                 risk_per_share=result.risk_per_share,
+                risk_target=sizing_equity * sizing.risk_pct / 100.0,
             )
 
         # --- 4. mark-to-market al cierre de t -------------------------------
@@ -412,6 +423,9 @@ def run_backtest(
     metrics["total_slippage"] = float(sum(t.slippage for t in portfolio.trades))
     metrics["open_at_end"] = len(forced)
     metrics["open_at_end_pnl"] = float(sum(t.pnl for t in forced))
+    metrics["sizing_by_risk"] = sizing_counts["riesgo"]
+    metrics["sizing_by_cap"] = sizing_counts["tope"]
+    metrics["sizing_by_cash"] = sizing_counts["cash"]
 
     return BacktestResult(
         config=config,

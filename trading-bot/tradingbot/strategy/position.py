@@ -29,6 +29,9 @@ class Position:
 
     # --- contabilidad interna del backtest ---
     direction: int = 1
+    #: 1R declarado por el YAML al momento de la señal (equity x risk_pct), en pesos.
+    #: El realizado es shares x risk_per_share y casi nunca coincide: ver README.
+    risk_target: float = 0.0
     stop_initial: float = 0.0
     target_price: float | None = None
     trough_price: float = 0.0

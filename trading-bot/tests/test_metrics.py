@@ -27,8 +27,11 @@ from tradingbot.backtest.metrics import (
     cagr,
     compute_metrics,
     drawdown_series,
+    expectancy_money,
     expectancy_r,
     max_consecutive_losses,
+    return_on_risk,
+    risk_deployed,
     max_drawdown,
     max_drawdown_days,
     profit_factor,
@@ -38,6 +41,7 @@ from tradingbot.backtest.metrics import (
     top_trades_concentration,
     win_loss_ratio,
     win_rate,
+    worst_losing_streak_money,
 )
 from tradingbot.backtest.portfolio import Trade
 
@@ -334,3 +338,97 @@ def test_ninguna_metrica_es_infinita_en_una_corrida_normal(equity, trades):
         if isinstance(valor, float):
             assert not math.isinf(valor), clave
             assert not np.isnan(valor), clave
+
+
+# --------------------------------------------------------------------------
+# La unidad de riesgo: expectancy vs. retorno sobre riesgo desplegado
+# --------------------------------------------------------------------------
+def _trade_con_riesgo(pnl: float, *, riesgo: float, dia: int) -> Trade:
+    """Un trade con riesgo real ``riesgo`` en pesos (acciones × riesgo por acción)."""
+    return Trade(
+        symbol="TEST",
+        entry_date=pd.Timestamp("2020-01-01").date(),
+        entry_price=100.0,
+        shares=10,
+        risk_per_share=riesgo / 10,
+        stop_initial=100.0 - riesgo / 10,
+        exit_date=(pd.Timestamp("2020-01-01") + pd.Timedelta(days=dia)).date(),
+        exit_price=100.0 + pnl / 10,
+        exit_reasons=["take_profit" if pnl > 0 else "hard_stop"],
+        pnl=pnl,
+        pnl_r=pnl / riesgo,
+        bars_held=5,
+        mae_r=-0.5,
+        mfe_r=1.5,
+        commission=0.0,
+        slippage=0.0,
+        risk_target=100.0,
+    )
+
+
+def test_risk_amount_es_acciones_por_riesgo_por_accion(trades):
+    """1R en pesos: 10 acciones × $10 de riesgo por acción = $100."""
+    assert trades[0].risk_amount == pytest.approx(100.0)
+    assert trades[0].as_row()["risk_amount"] == pytest.approx(100.0)
+
+
+def test_con_r_constante_expectancy_y_retorno_sobre_riesgo_coinciden(trades):
+    """Es la razón por la que el test de expectancy a mano sigue valiendo."""
+    assert all(t.risk_amount == pytest.approx(100.0) for t in trades)
+    assert return_on_risk(trades) == pytest.approx(expectancy_r(trades))
+    assert return_on_risk(trades) == pytest.approx(0.84375)
+
+
+def test_con_r_heterogeneo_se_separan():
+    """Tres trades con riesgo real distinto, calculado a mano.
+
+    A: +150 sobre $100 de riesgo  -> +1.50R
+    B: -50  sobre $50  de riesgo  -> -1.00R
+    C: +40  sobre $200 de riesgo  -> +0.20R
+
+    Expectancy (media de pnl_r) = (1.50 − 1.00 + 0.20)/3 = 0.70/3 = 0.2333…
+      cada trade pesa igual, y el de $50 de riesgo pesa lo mismo que el de $200.
+
+    Retorno sobre riesgo desplegado = Σpnl/Σriesgo = (150 − 50 + 40)/(100+50+200)
+                                    = 140/350 = 0.40
+      cada trade pesa por la plata que puso en juego.
+
+    Expectancy en plata = (150 − 50 + 40)/3 = 140/3 = 46.6666…
+    """
+    trades = [
+        _trade_con_riesgo(150.0, riesgo=100.0, dia=1),
+        _trade_con_riesgo(-50.0, riesgo=50.0, dia=2),
+        _trade_con_riesgo(40.0, riesgo=200.0, dia=3),
+    ]
+    assert [t.risk_amount for t in trades] == [100.0, 50.0, 200.0]
+
+    assert expectancy_r(trades) == pytest.approx(0.70 / 3)
+    assert expectancy_r(trades) == pytest.approx(0.2333333333, rel=1e-9)
+    assert return_on_risk(trades) == pytest.approx(140 / 350)
+    assert return_on_risk(trades) == pytest.approx(0.40)
+    assert expectancy_money(trades) == pytest.approx(140 / 3)
+    assert risk_deployed(trades) == pytest.approx(350.0)
+
+    # la lectura ingenua: 0.2333R x $100 declarados = $23.33 por trade,
+    # cuando el promedio real es $46.67. El informe tiene que mostrar las dos.
+    assert expectancy_r(trades) * 100 == pytest.approx(23.3333333, rel=1e-6)
+    assert expectancy_money(trades) == pytest.approx(46.6666667, rel=1e-6)
+
+
+def test_retorno_sobre_riesgo_sin_riesgo_no_explota():
+    assert return_on_risk([]) == 0.0
+
+
+def test_costo_de_la_peor_racha_en_plata():
+    """Racha L L W L L L W: la peor son las tres últimas, −10 −20 −30 = −60."""
+    trades = [
+        _trade_con_riesgo(-10.0, riesgo=100.0, dia=1),
+        _trade_con_riesgo(-15.0, riesgo=100.0, dia=2),
+        _trade_con_riesgo(100.0, riesgo=100.0, dia=3),
+        _trade_con_riesgo(-10.0, riesgo=100.0, dia=4),
+        _trade_con_riesgo(-20.0, riesgo=100.0, dia=5),
+        _trade_con_riesgo(-30.0, riesgo=100.0, dia=6),
+        _trade_con_riesgo(50.0, riesgo=100.0, dia=7),
+    ]
+    assert max_consecutive_losses(trades) == 3
+    assert worst_losing_streak_money(trades) == pytest.approx(-60.0)

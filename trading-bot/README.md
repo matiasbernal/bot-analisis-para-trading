@@ -124,6 +124,50 @@ Tres cosas que el informe dice y conviene no pasar por alto:
 7. **Reproducibilidad**: cada corrida guarda un manifiesto con el YAML exacto, el
    hash de los datos y el commit. Dos corridas dan el mismo archivo.
 
+## La unidad de riesgo (1R) — leer antes de la Fase 3
+
+**1R no vale lo que dice el YAML.** `risk_pct: 1.0` sobre $10.000 declara $100
+por trade, pero el riesgo que termina teniendo cada posición es
+`acciones × riesgo por acción`, y eso es menos: el tamaño se redondea a acciones
+enteras y, sobre todo, el tope de concentración recorta la posición. Medido
+sobre la plantilla `ema_cross` y el fixture (`scripts/riesgo_realizado.py`):
+
+```
+min 0.54R   media 0.78R   max 0.99R   (nunca por encima de 1R)
+```
+
+De ahí salen tres reglas que el resto del proyecto tiene que respetar:
+
+1. **La expectancy del plan sigue siendo la media de `pnl_r`** — "cuánto deja un
+   trade típico", cada trade pesando igual. No se toca. Lo que **no** se puede
+   hacer es traducirla a plata multiplicando por el 1R declarado: sobre el
+   fixture esa cuenta da $25.09 por trade cuando el promedio real es $17.27, un
+   45% de más. Por eso el informe imprime las tres cosas juntas: expectancy en R,
+   expectancy en plata, y el 1R realizado promedio.
+
+2. **Retorno sobre riesgo desplegado** (`Σ pnl / Σ riesgo real`) es otra métrica,
+   no un reemplazo: pondera cada trade por la plata que puso en juego. Responde
+   "cuánto devolvió cada peso arriesgado", que es la pregunta del riesgo de
+   cartera, no la de la calidad de la regla.
+
+3. **El heat de cartera de la Fase 3 se calcula en pesos, no contando R
+   nominales**:
+
+   ```
+   heat = Σ(riesgo real de las posiciones abiertas) / equity
+   ```
+
+   `max_portfolio_heat_r: 4.0` significa **4% del equity en riesgo abierto**, y
+   se compara contra esa suma. Contar "cuatro posiciones de 1R" daría 4R
+   nominales que en la práctica son ~3.1R, y el cortacircuito quedaría
+   calibrado sobre una unidad que no es la que dice. Lo mismo vale para el
+   riesgo que muestre la alerta y para cualquier lectura tipo "cinco pérdidas
+   seguidas son −5R", que está inflada en la misma proporción: el informe
+   publica el costo de la peor racha en plata justamente por eso.
+
+Cada `Trade` guarda `risk_amount` (el 1R realizado) y `risk_target` (el
+declarado al momento de la señal). Los dos van a la tabla de trades y al journal.
+
 ## El cotejo contra `backtesting.py`
 
 El motor es propio, así que se coteja contra una implementación independiente:

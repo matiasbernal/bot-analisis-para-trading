@@ -32,6 +32,20 @@ class Trade:
     mfe_r: float
     commission: float
     slippage: float
+    #: 1R declarado al momento de la señal, en pesos (0 si no se registró)
+    risk_target: float = 0.0
+
+    @property
+    def risk_amount(self) -> float:
+        """1R de este trade, en pesos: lo que se perdía si saltaba el stop inicial.
+
+        Es la unidad de riesgo **realizada**, no la declarada en el YAML. Las dos
+        difieren porque el tamaño se redondea a acciones enteras y porque el tope
+        de concentración recorta posiciones (ver README, "La unidad de riesgo").
+        Todo lo que se denomine en R —el heat de cartera de la Fase 3, el riesgo
+        de la alerta, las rachas— tiene que usar este número y no el nominal.
+        """
+        return self.shares * self.risk_per_share
 
     @property
     def is_forced_close(self) -> bool:
@@ -50,6 +64,8 @@ class Trade:
             "entry_price": self.entry_price,
             "shares": self.shares,
             "stop_initial": self.stop_initial,
+            "risk_amount": self.risk_amount,
+            "risk_target": self.risk_target,
             "exit_date": pd.Timestamp(self.exit_date),
             "exit_price": self.exit_price,
             "exit_reasons": ",".join(self.exit_reasons),
@@ -98,6 +114,7 @@ class Portfolio:
         shares: int,
         risk_per_share: float,
         target_ratio: float | None,
+        risk_target: float = 0.0,
     ) -> Position | None:
         """Compra en ``reference_price`` ± slippage, paga comisión y abre la posición."""
         fill = self.costs.buy_fill(reference_price)
@@ -124,6 +141,7 @@ class Portfolio:
             target_price=(
                 fill + target_ratio * risk_per_share if target_ratio is not None else None
             ),
+            risk_target=risk_target,
             commission_paid=commission,
             slippage_paid=self.costs.slippage_cost(reference_price, fill, shares),
         )
@@ -177,6 +195,7 @@ class Portfolio:
             mfe_r=position.mfe_r,
             commission=total_commission,
             slippage=total_slippage,
+            risk_target=position.risk_target,
         )
         self.trades.append(trade)
         return trade
@@ -207,8 +226,8 @@ class Portfolio:
             return pd.DataFrame(
                 columns=[
                     "symbol", "entry_date", "entry_price", "shares", "stop_initial",
-                    "exit_date", "exit_price", "exit_reasons", "pnl", "pnl_r",
-                    "bars_held", "mae_r", "mfe_r", "commission", "slippage",
+                    "risk_amount", "risk_target", "exit_date", "exit_price", "exit_reasons", "pnl",
+                    "pnl_r", "bars_held", "mae_r", "mfe_r", "commission", "slippage",
                 ]
             )
         return pd.DataFrame([t.as_row() for t in self.trades])
