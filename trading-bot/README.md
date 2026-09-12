@@ -203,6 +203,15 @@ tanda 2. Un backtest que ignora en silencio la mitad de tu configuración miente
 pytest -v                  # todo
 pytest tests/test_no_lookahead.py -v
 pytest -m "not network"    # sin los que necesitan internet
+pytest -m "not playwright" # sin los que necesitan navegador
+```
+
+Los tests responsive usan el Chromium que instala `playwright install chromium`.
+Si ya tenés uno en otro lado (contenedor, CI), apuntá la variable en vez de
+bajar otro:
+
+```bash
+TRADINGBOT_CHROMIUM=/ruta/al/chromium pytest tests/test_report_responsive.py
 ```
 
 Los que necesitan red detectan conectividad y se saltean con el motivo; los que

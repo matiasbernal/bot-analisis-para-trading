@@ -114,3 +114,22 @@ def test_sobre_drift_positivo_buy_and_hold_gana_plata(universe_frames):
     assert result.benchmark_metrics["cagr"] > 0
     assert result.benchmark.iloc[-1] > result.benchmark.iloc[0]
     assert result.metrics["cagr"] == pytest.approx(result.metrics["cagr"])  # no NaN
+
+
+def test_el_manifiesto_guarda_el_proveedor_de_cada_serie(universe_frames):
+    """Sin esto el manifiesto no distingue datos reales de fixtures."""
+    config = make_strategy(**CONFIG)
+    result = run_backtest(config, universe_frames)
+
+    sin_dato = build_manifest(config, universe_frames, result.metrics)
+    assert set(sin_dato["data"]["providers"].values()) == {"desconocido"}
+
+    con_dato = build_manifest(
+        config,
+        universe_frames,
+        result.metrics,
+        providers={s: "serie SINTÉTICA" for s in universe_frames},
+    )
+    assert set(con_dato["data"]["providers"].values()) == {"serie SINTÉTICA"}
+    # cambiar el proveedor cambia el fingerprint: no es un campo decorativo
+    assert sin_dato["fingerprint"] != con_dato["fingerprint"]

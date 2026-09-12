@@ -22,19 +22,29 @@ sync_playwright = pytest.importorskip(
     "playwright.sync_api", reason="playwright no está instalado"
 ).sync_playwright
 
-#: el entorno del sandbox trae Chromium acá; en tu máquina lo pone `playwright install`
-CHROMIUM_FALLBACK = Path("/opt/pw-browsers/chromium")
+#: Ruta al binario de Chromium, si no es el que instaló `playwright install`.
+#: Existe porque hay entornos (contenedores, CI, el sandbox de Claude) donde el
+#: navegador viene preinstalado en otro lado y con otra versión. El código no
+#: sabe de ninguna ruta en particular: se la decís vos.
+#:     TRADINGBOT_CHROMIUM=/ruta/al/chromium pytest tests/test_report_responsive.py
+CHROMIUM_ENV = "TRADINGBOT_CHROMIUM"
 
 ANCHOS = [390, 412, 1280]
 
 
 def _launch(playwright):
+    explicito = os.environ.get(CHROMIUM_ENV)
+    if explicito:
+        if not Path(explicito).exists():
+            pytest.skip(f"{CHROMIUM_ENV}={explicito} no existe")
+        return playwright.chromium.launch(executable_path=explicito)
     try:
         return playwright.chromium.launch()
     except Exception:
-        if CHROMIUM_FALLBACK.exists():
-            return playwright.chromium.launch(executable_path=str(CHROMIUM_FALLBACK))
-        pytest.skip("no hay Chromium: corré `playwright install chromium`")
+        pytest.skip(
+            "no hay Chromium: corré `playwright install chromium`, o apuntá "
+            f"{CHROMIUM_ENV} al binario que ya tengas"
+        )
 
 
 @pytest.fixture(scope="module")
@@ -88,7 +98,6 @@ def test_el_informe_de_consola_trae_el_benchmark_al_lado(informe):
 @pytest.mark.playwright
 @pytest.mark.parametrize("ancho", ANCHOS)
 def test_sin_scroll_horizontal(informe, ancho, tmp_path):
-    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers")
     with sync_playwright() as playwright:
         browser = _launch(playwright)
         page = browser.new_page(viewport={"width": ancho, "height": 844})
@@ -107,7 +116,6 @@ def test_sin_scroll_horizontal(informe, ancho, tmp_path):
 
 @pytest.mark.playwright
 def test_a_390_los_graficos_entran_y_los_toques_son_alcanzables(informe):
-    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers")
     with sync_playwright() as playwright:
         browser = _launch(playwright)
         page = browser.new_page(viewport={"width": 390, "height": 844})
