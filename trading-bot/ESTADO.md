@@ -33,16 +33,27 @@ todas a partir de huecos encontrados revisando el resultado contra el plan:
 Python 3.11. Los 6 skips son los cuatro tests que necesitan red y los dos que
 necesitan los CSV reales, que todavía no existen.
 
-**Qué sigue: Fase 3.** Está descrita en `PLAN.md` (siete capas de salida, riesgo
-de cartera, atribución/contrafáctico/MAE-MFE). Hay una tensión sin resolver que
-conviene mirar antes de empezar: el plan pone las siete capas en una sola tanda,
-pero también dice que cada capa se prende sola, se mide y se queda solo si mejora
-la expectancy fuera de muestra — y siete capas de una no se pueden medir así.
-**No hay decisión tomada sobre cómo lotearlo.** Lo que quedó propuesto, sin
-aceptar: primero la infraestructura de medición (atribución completa,
-contrafáctico, MAE/MFE) con una sola capa nueva (trailing, la que el plan ya
-declara prendida), después el riesgo de cartera —que no depende de las salidas y
-ya tiene fixture—, y las capas restantes de a una sobre el andamio ya construido.
+**Qué sigue: Fase 3, loteada en tres.** La tensión que había acá —el plan ponía las
+siete capas en una sola tanda y al mismo tiempo pedía medir cada una sola— quedó
+resuelta el 2026-09-12 y **la decisión está escrita en `PLAN.md`**, en la sección
+"El torneo de capas" y en la tabla de la Fase 3. Resumen, para no tener que ir:
+
+- **2A**: estado de la posición abierta, el banco de comparación A/B con bootstrap
+  pareado por trade, el poder de medición publicado **por capa**, y `trailing_stop`
+  como línea base (no como candidata: el plan ya la declara prendida).
+- **2B**: riesgo de cartera. Va en el medio y no al final porque cambia el tamaño
+  de las posiciones, y el tamaño cambia toda expectancy en pesos: si el torneo
+  corre primero, sus mediciones quedan obsoletas el día que entra el heat.
+- **2C**: el torneo, de a una, en orden de grados de libertad creciente, con una
+  pasada final donde las capas descartadas se reevalúan contra la configuración
+  ganadora.
+
+Las dos decisiones de fondo que conviene no re-discutir sin leer el fundamento:
+cada capa se decide con walk-forward **dentro del in-sample** y el out-of-sample
+se gasta una sola vez al final del torneo (seis decisiones contra el OOS lo gastan
+seis veces: ~26% de probabilidad de quedarse con al menos una capa inútil), y el
+resultado del torneo **depende del orden**, así que el orden se registra con el
+resultado.
 
 ---
 

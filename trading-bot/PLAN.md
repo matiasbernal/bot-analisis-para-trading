@@ -313,8 +313,16 @@ Viven en `strategy/position.py` (estado de cada posición abierta) y `strategy/e
 parámetros de salida se puede ajustar para que cualquier histórico dé lindo, y eso no es una
 estrategia, es una curva dibujada a mano. La regla es: **las plantillas arrancan con dos capas
 prendidas (hard stop + trailing). Cada capa adicional se prende sola, se mide con la atribución
-de salidas, y se queda solo si mejora la expectancy fuera de muestra.** Si dos capas hacen lo
-mismo (giveback y trailing chandelier se pisan bastante), se elige una.
+de salidas, y se queda solo si mejora la expectancy contra la línea base.** Si dos capas hacen
+lo mismo (giveback y trailing chandelier se pisan bastante), se elige una.
+
+> **Corrección (2026-09-12).** La versión original de esta regla decía "si mejora la
+> expectancy **fuera de muestra**". Aplicada capa por capa, esa regla se contradice con la
+> regla de rigor 6: seis decisiones mirando el tramo 2021-2025 son seis miradas al
+> out-of-sample, y a partir de la segunda deja de serlo. Cada capa se decide con
+> walk-forward **dentro del in-sample**; el out-of-sample se gasta una vez, al final del
+> torneo, sobre la configuración que quedó. El procedimiento completo está en "El torneo de
+> capas", más abajo, y es la forma en que se loteó la Fase 3.
 
 ### 0. Salida por señal — la regla inversa de la entrada
 
@@ -476,6 +484,102 @@ saber si sumó o restó. Por eso el informe incluye dos análisis específicos:
   herramienta para calibrar el stop con datos y no a ojo**: si los ganadores casi nunca fueron
   más de 1.2 ATR en contra, un stop de 2 ATR está regalando riesgo.
 
+### El torneo de capas — cómo se decide qué queda prendido
+
+*(Agregado el 2026-09-12, al lotear la Fase 3. Reemplaza la idea de que las capas son una
+sola entrega.)*
+
+La Fase 3 tal como estaba escrita pedía las seis capas juntas y al mismo tiempo pedía medir
+cada una sola. Las dos cosas no caben en una entrega, por dos razones independientes.
+
+**Primera: el presupuesto de out-of-sample.** Seis decisiones binarias tomadas mirando el
+tramo 2021-2025 son seis miradas al out-of-sample. Con α = 0.05 por decisión, la
+probabilidad de quedarse con **al menos una** capa que en realidad no aporta es
+1 − 0.95⁶ ≈ **26%**, y ese 26% no se ve: la capa queda prendida en la plantilla y parece
+validada. El propio informe imprime la regla que eso viola ("el out-of-sample se mira una
+vez, al final").
+
+**Segunda: el instrumento.** "Se queda solo si mejora la expectancy" supone que la mejora se
+puede medir. La expectancy tiene error estándar σ_R/√n; con los 31 trades de la plantilla
+actual eso es del orden de ±0.3R, y una capa que mejore 0.1R es invisible. Construir seis
+capas para después descubrir que el instrumento no las resuelve es el orden equivocado: el
+poder de medición se calcula **antes**, y si no alcanza, lo que cambia es el universo y el
+período, no las capas.
+
+#### El procedimiento
+
+1. Cada capa se decide **dentro del in-sample** (`backtest.in_sample_end`). El in-sample se
+   parte en tramos consecutivos y la capa tiene que mostrar el mismo signo en los tramos,
+   no solo en el agregado: una mejora que vive entera en un tramo es un régimen de mercado,
+   no una capa.
+2. Si la capa solo se prende o apaga (parámetros fijos por la plantilla), con eso alcanza:
+   es validación repetida, no ajuste. Si además se tocan sus parámetros, el tramo *k* se usa
+   para elegirlos y el *k+1* para medirlos, sin volver atrás — walk-forward de verdad.
+3. **El out-of-sample se gasta una sola vez**, al final del torneo, sobre la configuración
+   ganadora completa. No hay una mirada por capa. Si el out-of-sample contradice al
+   in-sample, se reporta y se vuelve a la línea base de dos capas; no se reabre el torneo
+   sobre el mismo tramo, porque ahí ya dejaría de ser out-of-sample.
+4. La cantidad de tramos está acotada por el poder: un tramo con cinco trades no decide
+   nada. El número de tramos sale del cálculo de poder, no de partir el calendario en
+   pedazos iguales.
+
+#### Las dos reglas de desempate
+
+- **El default es apagada.** Empate estadístico = la capa no entra. La carga de la prueba es
+  de la capa, no del stop: cada capa que se prende agrega parámetros, y los parámetros se
+  pagan en sobreajuste aunque el backtest no lo muestre.
+- **Una mejora de expectancy que viene con menos trades no es una mejora** hasta mirar
+  `return_on_risk` y el heat. Una capa que corta la mitad de los trades puede subir la
+  expectancy por trade y bajar el retorno sobre el riesgo desplegado: la expectancy pondera
+  cada trade igual, y si quedan menos trades y cada uno arriesga lo mismo, el capital rinde
+  menos con mejor número por trade. Las dos métricas se miran juntas o no se mira ninguna.
+
+#### El torneo depende del orden, y hay que decirlo
+
+Las capas interactúan, así que el resultado **no es una propiedad de la capa sino del par
+(capa, línea base contra la que se midió)**. Si `break_even` entra primero, `giveback` se
+mide contra una línea base que ya lo tiene, y con el orden invertido el resultado puede ser
+otro. El caso evidente es `giveback` contra `trailing` (se pisan), pero no es el único:
+`time_stop` y `reversal` compiten por los mismos trades laterales, y `break_even` le saca
+trabajo al `trailing`.
+
+Dos consecuencias, las dos obligatorias:
+
+- El orden del torneo se elige por costo de instrumento (de menos grados de libertad a más,
+  para gastar el in-sample en las decisiones baratas primero) y **queda registrado junto al
+  resultado**. Un resultado de torneo sin su orden no es reproducible.
+- **Pasada final de reevaluación.** Cuando el torneo termina, las capas que quedaron afuera
+  se vuelven a medir **contra la configuración ganadora**, no contra la línea base. Una capa
+  puede no aportar sobre dos capas y sí sobre cinco: `break_even` descartado solo puede
+  tener sentido una vez que `time_stop` cambió la distribución de trades que llegan vivos a
+  +1R. Si alguna entra en esta pasada, la pasada se repite con la configuración nueva, hasta
+  que ninguna entre.
+
+#### El poder de medición es uno por capa, no uno global
+
+Un MDE global miente. Una capa que toca todos los trades (`trailing`, `break_even`) tiene
+mucho más poder que una que toca el 15% (`market_regime`, `event_risk`): si la capa cambia
+el resultado de una fracción *f* de los trades, el efecto mínimo detectable **por trade
+afectado** escala con 1/√(f·n), y el efecto sobre la expectancy global con √(f/n). Entre
+f = 1.0 y f = 0.15 hay un factor 2.6: con el mismo universo y el mismo período, una capa
+rara necesita un efecto 2.6 veces más grande para ser medible.
+
+Por eso el informe publica **una fila por capa** con su fracción estimada de trades
+afectados, el efecto mínimo detectable por trade afectado, el efecto equivalente en
+expectancy global, y el margen que esa capa tiene disponible (cuánta R hay realmente en
+juego, de MAE/MFE). Una capa cuyo MDE supera su margen disponible **no se mide**: se declara
+no medible con este universo y este período, y eso se dice en vez de reportar un empate como
+si fuera información.
+
+#### `event_risk` y la red
+
+`event_risk` es la única capa que depende de un dato externo que el entorno puede no tener
+(`Ticker.earnings_dates` necesita red). **Decisión: el torneo se declara completo sin ella.**
+`event_risk` queda pendiente con su motivo escrito, y se mide cuando haya red, como una
+pasada de reevaluación más contra la configuración ganadora. Una capa bloqueada por política
+de entorno no frena a las otras seis: si lo hiciera, el proyecto quedaría esperando algo que
+no depende del código.
+
 ---
 
 ## Las reglas de rigor (no negociables)
@@ -494,7 +598,9 @@ Esto es lo que separa un backtest útil de uno que miente:
    contra SPY. Una estrategia que rinde menos que comprar y esperar no sirve, por linda que sea
    la curva.
 6. **Out-of-sample reservado.** Se afinan parámetros solo sobre el período in-sample. El tramo
-   final se toca una vez, al final. Si se mira 20 veces, deja de ser out-of-sample.
+   final se toca una vez, al final. Si se mira 20 veces, deja de ser out-of-sample. **Prender
+   o apagar una capa de salida cuenta como una mirada**: seis capas decididas contra el
+   out-of-sample lo gastan seis veces (ver "El torneo de capas").
 
 **Métricas del informe**: CAGR, Max Drawdown y su duración, Sharpe, Sortino, Calmar, Profit
 Factor, Win Rate, Expectancy, ratio ganancia/pérdida media, cantidad de trades, % de tiempo
@@ -743,10 +849,25 @@ CLI `backtest`. Arranca con hard stop y take profit solamente. Es la fase más g
 Verificable: `test_no_lookahead.py` en verde y la comparación contra `backtesting.py` sobre un
 cruce de medias simple.
 
-**Fase 3 — Gestión de la posición abierta.** Las seis capas de salida, el orden de prioridad
+**Fase 3 — Gestión de la posición abierta.** Las capas de salida, el orden de prioridad
 intrabar, y las métricas de atribución / contrafáctico / MAE-MFE. Se construye sobre un motor
 ya validado, no antes. Verificable: correr la misma estrategia con cada capa prendida y apagada
 y comparar — si una capa no mejora la expectancy, queda apagada por defecto.
+
+**No es una sola entrega** (loteo decidido el 2026-09-12; el fundamento está en "El torneo de
+capas"). Va en tres, y el criterio del corte no es el tamaño sino qué hace falta para que una
+capa sea medible:
+
+| | Qué entra | Por qué acá |
+|---|---|---|
+| **2A** | Estado de la posición abierta (`position.py`), el banco de comparación A/B con bootstrap pareado por trade, el poder de medición publicado por capa, y `trailing_stop` chandelier | El estado es el piso de cuatro capas, no una capa. El banco y el poder son el instrumento: sin ellos "se queda si mejora" no se puede ejecutar. **El poder se publica antes de escribir la primera capa**: si no alcanza, lo que cambia es el plan de la tanda, y es más barato saberlo con una capa escrita que con seis |
+| **2B** | Riesgo de cartera: heat total en pesos, `max_per_group`, cortacircuito por drawdown | Va **antes** del torneo, no después: el riesgo de cartera cambia el tamaño de las posiciones, y el tamaño cambia toda expectancy en pesos y todo drawdown. Si el torneo corre primero, las seis mediciones quedan obsoletas el día que entra el heat y hay que repetirlas |
+| **2C** | El torneo: `break_even`, `time_stop`, `giveback`, `reversal`, `market_regime`, de a una y en ese orden, más la pasada final de reevaluación | Orden por grados de libertad creciente, para gastar el in-sample en las decisiones baratas primero. `giveback` se mide **contra** el trailing ya fijo, que es donde el "si dos capas hacen lo mismo, se elige una" deja de ser una frase y pasa a ser un número |
+
+`trailing_stop` entra en 2A **como línea base y no como candidata**: la regla de las
+plantillas dice que arrancan con dos capas prendidas (hard stop + trailing), así que el
+trailing no compite en el torneo, es lo que el resto tiene que superar. `event_risk` queda
+fuera de 2C por la red, con la decisión escrita arriba.
 
 **Fase 4 — Informes, scan, journal y web de solo lectura.** Informe HTML con equity curve,
 drawdown y gráfico de precio con marcas de entrada/salida y el motivo de cada salida. Comando
