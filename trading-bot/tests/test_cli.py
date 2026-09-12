@@ -101,6 +101,36 @@ def test_simbolo_sin_datos_avisa_y_falla():
     assert "No se pudo cargar ningún símbolo" in result.output
 
 
+def test_avisa_cuando_los_datos_no_cubren_el_rango_pedido():
+    """El YAML pide 2010-2025 y el fixture va de 2018 a 2022: tiene que decirlo."""
+    result = runner.invoke(
+        app,
+        [
+            "backtest",
+            "--strategy", str(ROOT / "config/strategies/ema_cross.yaml"),
+            "--data", str(ROOT / "tests/fixtures"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "RANGO RECORTADO" in result.output
+    assert "2010-01-01" in result.output and "2025-12-31" in result.output
+
+
+def test_sin_recorte_no_hay_aviso(universe_frames):
+    from conftest import make_strategy
+
+    from tradingbot.backtest.engine import run_backtest
+    from tradingbot.reporting.report import period_note
+
+    frames = {"SPY": universe_frames["SPY"]}
+    config = make_strategy(
+        universe=["SPY"],
+        warmup_bars=50,
+        backtest={"start": "2018-01-01", "end": "2022-10-14", "initial_cash": 10_000.0},
+    )
+    assert period_note(run_backtest(config, frames)) == ""
+
+
 def test_la_ayuda_funciona():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0

@@ -59,6 +59,12 @@ Opciones: `--symbol` restringe el universo, `--offline` usa solo el cache,
 
 ## Generar los fixtures reales (en tu máquina)
 
+**Los fixtures que vienen en el repo son sintéticos, no datos de mercado.**
+`tests/fixtures/synthetic/{AAPL,MSFT,SPY,QQQ}.csv` son random walks
+determinísticos etiquetados con nombres de ticker para que las plantillas corran
+sin red. Sirven para probar el motor; no se puede concluir nada sobre ninguna
+estrategia a partir de ellos, y el informe los rotula como "serie SINTÉTICA".
+
 El sandbox donde se construyó esto no llega a Yahoo ni a Stooq. Los CSV reales
 los generás vos, una vez, y se commitean:
 
@@ -89,6 +95,20 @@ El orden en que conviene mirarlo:
 
 El HTML está diseñado para el celular: una columna, gráficos que se adaptan,
 tablas que scrollean solas, modo oscuro según el sistema.
+
+Tres cosas que el informe dice y conviene no pasar por alto:
+
+- **Si el rango del YAML no coincide con los datos**, lo avisa ("RANGO
+  RECORTADO"). Pedir 2010-2025 y correr 2018-2022 cambia todo lo que sigue.
+- **Las posiciones abiertas al cierre del período** van aparte y no cuentan como
+  trades: no las cerró ninguna regla.
+- **De dónde salió cada serie** está rotulado (sintética, CSV local, Yahoo).
+
+> **Alcance**: el informe es de la tanda 1. Cuando llegue la Fase 3 con el
+> contrafáctico, la atribución completa y el análisis MAE/MFE, la plantilla va a
+> cambiar y **la verificación responsive (390/412/1280 px) hay que repetirla**.
+> Lo mismo cuando se agreguen las capas de salida: la tabla de atribución va a
+> tener más filas y un trade va a poder salir por varias reglas a la vez.
 
 ## Las reglas de rigor (no negociables)
 
@@ -163,6 +183,15 @@ execution:
 Operadores: `>`, `<`, `>=`, `<=`, `==`, `crosses_above`, `crosses_below`,
 `between`, `rising`, `falling`, `pct_change_gt`. Los indicadores de varias
 salidas se referencian con punto (`macd.hist`, `bb.upper`).
+
+### Plantillas
+
+| Archivo | Qué es |
+|---|---|
+| `ema_cross.yaml` | Cruce de medias con filtro de tendencia. La del plan. |
+| `rsi_pullback.yaml` | Retroceso sobre tendencia alcista. La del plan. |
+| `breakout_52w.yaml` | **Pendiente.** Ruptura del máximo de 52 semanas: necesita el indicador `donchian`, que llega en la tanda 2. El slot queda vacío a propósito. |
+| `extra_bollinger_upper_break.yaml` | Extra, no está en el plan. Ruptura de la banda superior de Bollinger. **No reemplaza a `breakout_52w`**: el máximo móvil es momentum y Bollinger es reversión a la media. |
 
 Lo que todavía no existe se **rechaza con un mensaje que lo dice**: poner
 `trailing_stop:` hoy no se ignora en silencio, falla explicando que es de la

@@ -1,9 +1,11 @@
-# Ruptura de la banda superior con filtro de fuerza de tendencia (ADX).
+# PLANTILLA EXTRA — no es la del plan.
 #
-# Nota: la plantilla `breakout_52w` del plan necesita un indicador de máximo
-# móvil (donchian / highest) que no está en la tanda 1. Cuando exista, la
-# ruptura de 52 semanas es una línea de YAML, no código nuevo.
-name: breakout_bollinger
+# Ruptura de la banda superior de Bollinger con filtro de fuerza de tendencia.
+# NO reemplaza a `breakout_52w`: el máximo móvil de 52 semanas es ruptura de
+# momentum y Bollinger es reversión a la media, o sea otra familia de estrategia.
+# `breakout_52w` sigue pendiente y llega con el indicador donchian en la tanda 2;
+# hasta entonces ese slot queda vacío a propósito.
+name: extra_bollinger_upper_break
 universe: [AAPL, MSFT, SPY, QQQ]
 interval: 1d
 warmup_bars: 200

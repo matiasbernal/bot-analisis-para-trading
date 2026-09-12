@@ -8,6 +8,17 @@ y devuelve **por qué** salió lo que salió:
 luego el tope de concentración ``max_position_pct`` (un stop muy ajustado sin
 tope produce posiciones gigantes) y luego el cash disponible. Acciones enteras,
 sin fraccionarias. Si el resultado es 0 no hay trade y queda registrado el motivo.
+
+**Cuándo se calcula**: al cierre de la barra de la señal, usando ``close[t]``
+como estimación del precio de entrada, porque es lo único que se sabe cuando se
+manda una orden market-on-open. En el fill solo se recorta si el cash no alcanza,
+nunca se agranda. El stop sí se ancla al precio de fill real, así que la
+distancia entrada-stop es exactamente 1R por acción.
+
+**Consecuencia medida** (``scripts/riesgo_realizado.py``): el riesgo inicial
+realizado queda entre 0.54R y 0.99R, con media 0.78R sobre la plantilla
+ema_cross. Nunca por encima de 1R. El desvío no viene del gap de la apertura
+sino del redondeo a acciones enteras y, sobre todo, del tope de concentración.
 """
 
 from __future__ import annotations

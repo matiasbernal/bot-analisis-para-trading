@@ -59,8 +59,14 @@ def synthetic_ohlcv(
     )
 
 
-#: universo sintético del sandbox: mismos símbolos que las plantillas, con
-#: parámetros distintos por símbolo pero seeds fijos
+#: Universo sintético del sandbox.
+#:
+#: OJO CON LOS NOMBRES: estas series **no son datos de mercado**. Son random
+#: walks determinísticos etiquetados AAPL/MSFT/SPY/QQQ para que las plantillas
+#: corran sin red. No se parecen a esos papeles ni pretenden hacerlo: sirven
+#: para probar el motor, no para sacar conclusiones sobre ninguna estrategia.
+#: Los datos reales van en tests/fixtures/SPY.csv y AAPL.csv, que se generan
+#: con scripts/fetch_fixture.py y tienen precedencia sobre estos.
 SYNTHETIC_UNIVERSE: dict[str, dict] = {
     "AAPL": {"seed": 11, "start_price": 120.0, "drift": 0.0006, "volatility": 0.016},
     "MSFT": {"seed": 22, "start_price": 180.0, "drift": 0.0005, "volatility": 0.014},

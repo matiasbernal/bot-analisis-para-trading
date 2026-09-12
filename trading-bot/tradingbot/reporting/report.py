@@ -182,6 +182,31 @@ def _cards(result: BacktestResult) -> list[dict[str, str]]:
     return cards
 
 
+def period_note(result: BacktestResult) -> str:
+    """Aviso cuando los datos no cubren el rango que pide el YAML.
+
+    El informe imprime el período que corrió de verdad; sin este aviso no hay
+    forma de saber que no es el que se pidió, y un backtest de 4 años se lee
+    como si fuera de 15.
+    """
+    if not result.period_requested or result.equity.empty:
+        return ""
+    pedido_start, pedido_end = result.period_requested
+    real_start, real_end = result.equity.index[0], result.equity.index[-1]
+
+    faltante = []
+    if pedido_start and pd.Timestamp(pedido_start) < real_start:
+        faltante.append(f"pedía desde {pedido_start}")
+    if pedido_end and pd.Timestamp(pedido_end) > real_end:
+        faltante.append(f"hasta {pedido_end}")
+    if not faltante:
+        return ""
+    return (
+        f"RANGO RECORTADO: el YAML {' y '.join(faltante)}; los datos disponibles "
+        f"van de {real_start:%Y-%m-%d} a {real_end:%Y-%m-%d}"
+    )
+
+
 def open_positions_lines(result: BacktestResult) -> list[str]:
     """Las posiciones que seguían abiertas cuando se acabaron los datos.
 
@@ -239,6 +264,8 @@ def render_console(result: BacktestResult, manifest: dict | None = None) -> str:
         f"Período       : {result.equity.index[0]:%Y-%m-%d} → "
         f"{result.equity.index[-1]:%Y-%m-%d}  ({len(result.equity)} velas)"
     )
+    if period_note(result):
+        add(f"                {period_note(result)}")
     add(
         f"Costos        : comisión {result.config.execution.commission_pct}% + "
         f"slippage {result.config.execution.slippage_pct}% por lado"
@@ -408,6 +435,7 @@ def render_html(
         metrics=result.metrics,
         cards=_cards(result),
         benchmark_header=benchmark_header(result),
+        period_note=period_note(result),
         warnings=warnings_for(result),
         charts={"equity": equity_html, "drawdown": drawdown_html, "prices": price_charts},
         exit_breakdown=exit_breakdown(result.rule_trades_frame),

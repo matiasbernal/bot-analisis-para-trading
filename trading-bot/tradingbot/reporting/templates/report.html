@@ -9,6 +9,7 @@
     {{ period.start }} → {{ period.end }} · {{ period.bars }} velas ·
     {{ metrics.n_trades }} trades
   </p>
+  {% if period_note %}<div class="banner">{{ period_note }}</div>{% endif %}
 </header>
 
 {% if warnings %}
