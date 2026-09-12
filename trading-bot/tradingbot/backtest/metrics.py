@@ -197,6 +197,53 @@ def top_trades_concentration(trades: Sequence[Trade], top: int = 5) -> float:
     return float(sum(wins[:top]) / sum(wins))
 
 
+#: cuántos ganadores hacen falta para que la concentración signifique algo
+MIN_WINNERS_FOR_CONCENTRATION = 10
+
+#: cuánto por encima de lo normal dispara el aviso
+CONCENTRATION_ALERT = 1.15
+
+
+def concentration_baseline(n_winners: int, top: int = 5) -> float:
+    """Cuánto aportarían los ``top`` mejores en un sistema sano de ``n`` ganadores.
+
+    El porcentaje crudo no se puede comparar contra un umbral fijo porque depende
+    casi por completo de cuántos ganadores hay: con 6 ganadores los 5 mejores son
+    el 98% por aritmética, y con 50 son el 32%. Un umbral de 80% salta siempre en
+    el primer caso y nunca en el segundo, midiendo la cantidad de trades y no la
+    concentración.
+
+    La referencia es la exponencial, que es la cola "normal" de una serie de
+    ganancias, y tiene forma cerrada: para ``n`` exponenciales iid, el j-ésimo
+    mayor vale en promedio ``Σ_{m=j..n} 1/m`` y la suma total vale ``n``, así que
+
+        baseline(n, k) = Σ_{j=1..k} Σ_{m=j..n} (1/m) / n
+
+    Con n=12 y k=5 da 0.758, contra 0.759 de una simulación de 20.000 corridas
+    (``test_concentracion.py`` lo verifica).
+    """
+    if n_winners <= 0:
+        return float("nan")
+    if n_winners <= top:
+        return 1.0
+    total = sum(sum(1.0 / m for m in range(j, n_winners + 1)) for j in range(1, top + 1))
+    return min(total / n_winners, 1.0)
+
+
+def concentration_ratio(trades: Sequence[Trade], top: int = 5) -> float:
+    """Concentración observada dividida por la normal para esa cantidad de ganadores.
+
+    1.00 es exactamente lo esperable; 1.30 es un resultado que depende de unos
+    pocos trades más de lo que debería. Se lee sin tabla de referencia.
+    """
+    ganadores = sum(1 for t in trades if t.pnl > 0)
+    base = concentration_baseline(ganadores, top)
+    observado = top_trades_concentration(trades, top)
+    if not base or math.isnan(base) or math.isnan(observado):
+        return float("nan")
+    return float(observado / base)
+
+
 def reliability(n_trades: int) -> str:
     """Semáforo: con pocos trades no se puede concluir nada."""
     if n_trades < 30:
@@ -253,6 +300,11 @@ def compute_metrics(
         "max_consecutive_losses": max_consecutive_losses(trades),
         "worst_streak_money": worst_losing_streak_money(trades),
         "top5_concentration": top_trades_concentration(trades),
+        "concentration_ratio": concentration_ratio(trades),
+        "concentration_baseline": concentration_baseline(
+            sum(1 for t in trades if t.pnl > 0)
+        ),
+        "n_winners": sum(1 for t in trades if t.pnl > 0),
         "avg_bars_held": float(np.mean([t.bars_held for t in trades])) if trades else 0.0,
         "total_commission": float(sum(t.commission for t in trades)),
         "total_slippage": float(sum(t.slippage for t in trades)),

@@ -18,6 +18,10 @@ import pandas as pd
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from tradingbot.backtest.engine import BacktestResult
+from tradingbot.backtest.metrics import (
+    CONCENTRATION_ALERT,
+    MIN_WINNERS_FOR_CONCENTRATION,
+)
 from tradingbot.backtest.validation import in_out_metrics
 from tradingbot.reporting import charts as charts_mod
 
@@ -43,7 +47,7 @@ METRIC_ROWS: list[tuple[str, str, str, bool]] = [
     ("n_trades", "Trades", "int", False),
     ("max_consecutive_losses", "Racha de pérdidas", "int", False),
     ("worst_streak_money", "Costo de la peor racha", "money_signed", False),
-    ("top5_concentration", "5 mejores / ganancia bruta", "pct", False),
+    ("concentration_ratio", "5 mejores vs. lo normal", "times", False),
     ("exposure_pct", "Días con posición", "pct", False),
 ]
 
@@ -66,6 +70,8 @@ def _fmt(value: Any, kind: str) -> str:
         return f"${value:+,.2f}"
     if kind == "num":
         return f"{value:.2f}"
+    if kind == "times":
+        return f"{value:.2f}×"
     if kind == "r":
         return f"{value:+.2f}R"
     if kind == "int":
@@ -134,16 +140,7 @@ def warnings_for(result: BacktestResult) -> list[dict[str, Any]]:
             }
         )
 
-    concentration = result.metrics.get("top5_concentration")
-    if isinstance(concentration, float) and not math.isnan(concentration) and concentration > 0.8:
-        out.append(
-            {
-                "strong": False,
-                "text": f"El {concentration * 100:.0f}% de la ganancia bruta sale de los 5 "
-                "mejores trades: el resultado depende de un puñado de operaciones, "
-                "no del sistema.",
-            }
-        )
+    out.extend(_concentration_warning(result))
 
     strat = result.metrics["cagr"]
     bench = result.benchmark_metrics["cagr"]
@@ -164,6 +161,45 @@ def warnings_for(result: BacktestResult) -> list[dict[str, Any]]:
         }
     )
     return out
+
+
+def _concentration_warning(result: BacktestResult) -> list[dict[str, Any]]:
+    """El aviso de concentración, calibrado contra la cantidad de ganadores.
+
+    Con menos de 10 ganadores el número no distingue un sistema concentrado de
+    uno con pocos trades, así que el informe lo dice en vez de callarse o de
+    inventar un aviso que no significa nada.
+    """
+    ganadores = int(result.metrics.get("n_winners", 0))
+    observado = result.metrics.get("top5_concentration")
+    base = result.metrics.get("concentration_baseline")
+    ratio = result.metrics.get("concentration_ratio")
+
+    if not ganadores or not isinstance(observado, float) or math.isnan(observado):
+        return []
+
+    if ganadores < MIN_WINNERS_FOR_CONCENTRATION:
+        return [
+            {
+                "strong": False,
+                "text": f"Con {ganadores} trades ganadores no se puede evaluar la "
+                f"concentración del resultado: con tan pocos, los 5 mejores son casi "
+                f"todo por aritmética ({observado * 100:.0f}%, y lo normal para "
+                f"{ganadores} ganadores ya es {base * 100:.0f}%).",
+            }
+        ]
+
+    if ratio > CONCENTRATION_ALERT:
+        return [
+            {
+                "strong": False,
+                "text": f"Los 5 mejores trades aportan el {observado * 100:.0f}% de la "
+                f"ganancia bruta, {ratio:.2f}× lo normal para {ganadores} ganadores "
+                f"({base * 100:.0f}%): el resultado depende de un puñado de "
+                f"operaciones, no del sistema.",
+            }
+        ]
+    return []
 
 
 def _cards(result: BacktestResult) -> list[dict[str, str]]:
