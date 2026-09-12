@@ -77,6 +77,7 @@ def test_el_informe_se_genera_y_trae_lo_obligatorio(informe):
     html = informe.read_text(encoding="utf-8")
     assert "Buy &amp; hold" in html or "Buy & hold" in html  # benchmark obligatorio
     assert "Drawdown" in html and "Trades" in html
+    assert "Poder de medición" in html  # el DoD de la tanda 2A pide publicarlo
     assert "sesgo de supervivencia" in html
     assert "plotly" in html.lower()
 

@@ -70,6 +70,53 @@
 </div>
 {% endif %}
 
+{% if poder %}
+<h2>Poder de medición</h2>
+<p class="muted">
+  Cuánto tiene que cambiar una capa de salida para distinguirse del ruido, con
+  {{ poder.n }} trades y σ del efecto {{ poder.sigma }} (α 0.05, potencia 80%).
+  El mínimo detectable por trade afectado escala con 1/√(f·n): una capa que toca
+  pocos trades necesita un efecto mucho más grande.
+</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Toca</th><th>MDE por trade afectado</th><th>MDE sobre la expectancy</th></tr></thead>
+    <tbody>
+    {% for fila in poder.curva %}
+      <tr><td>{{ fila.fraccion }}</td><td>{{ fila.afectado }}</td><td>{{ fila['global'] }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Capa</th><th>Afectados</th><th>f</th><th>MDE</th>
+        <th>Disponible</th><th>Cota</th><th>Veredicto</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for fila in poder.capas %}
+      <tr>
+        <td>{{ fila.capa }}</td><td>{{ fila.afectados }}</td><td>{{ fila.fraccion }}</td>
+        <td>{{ fila.mde }}</td><td>{{ fila.disponible }}</td><td>{{ fila.cota }}</td>
+        <td class="{{ fila.klass }}">{{ fila.veredicto }}</td>
+      </tr>
+    {% endfor %}
+    {% for fila in poder.sin_estimar %}
+      <tr><td>{{ fila.capa }}</td><td colspan="6">{{ fila.motivo }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="muted">
+  «Disponible» es el mejor caso de la capa sobre los trades que toca: capturar toda
+  la R que quedó sobre la mesa. Ninguna capa real captura todo, así que el veredicto
+  se lee como exigencia.
+</p>
+{% endif %}
+
 {% if open_positions %}
 <h2>Abiertas al cierre del período</h2>
 <p class="muted">

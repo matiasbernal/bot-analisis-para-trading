@@ -16,6 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import typer
 
 from tradingbot.backtest import ab
@@ -23,6 +24,7 @@ from tradingbot.backtest.ab import REPLICAS as AB_REPLICAS
 from tradingbot.backtest.ab import SEED as AB_SEED
 from tradingbot.backtest.engine import run_backtest
 from tradingbot.backtest.manifest import build_manifest, save_manifest
+from tradingbot.backtest.poder import poder_lineas
 from tradingbot.config import ConfigError, load_settings, load_strategy
 from tradingbot.data.cache import ParquetCache
 from tradingbot.data.local import LocalCsvProvider
@@ -217,6 +219,17 @@ def comparar(
         replicas=replicas,
     )
     typer.echo("\n".join(comparacion.lineas()))
+    typer.echo("")
+    # acá el σ no se estima: la variante existe, así que sale del propio pareo
+    deltas = [d for d in comparacion.pareo.deltas_r if d != 0.0]
+    sigma = float(np.std(deltas, ddof=1)) if len(deltas) > 1 else None
+    typer.echo(
+        "\n".join(
+            poder_lineas(
+                resultado_base.rule_trades, spy=resultado_base.spy_data, sigma=sigma
+            )
+        )
+    )
 
 
 def main() -> None:

@@ -22,6 +22,13 @@ from tradingbot.backtest.metrics import (
     CONCENTRATION_ALERT,
     MIN_WINNERS_FOR_CONCENTRATION,
 )
+from tradingbot.backtest.poder import (
+    SIN_ESTIMAR,
+    curva_de_poder,
+    poder_lineas,
+    poder_por_capa,
+    sigma_a_priori,
+)
 from tradingbot.backtest.validation import in_out_metrics
 from tradingbot.reporting import charts as charts_mod
 
@@ -306,6 +313,48 @@ def risk_unit_lines(result: BacktestResult) -> list[str]:
     return lines
 
 
+def poder_contexto(result: BacktestResult) -> dict[str, Any]:
+    """El bloque de poder de medición, para el HTML.
+
+    Va en el informe y no en un script aparte porque es la respuesta a "¿esta
+    corrida alcanza para decidir algo?", y esa pregunta se hace mirando el
+    informe. Sin el bloque, la tabla de métricas invita a comparar dos corridas
+    de frente, que es exactamente el error que el banco A/B existe para evitar.
+    """
+    trades = result.rule_trades
+    if not trades:
+        return {}
+    sigma = sigma_a_priori(trades)
+    return {
+        "n": len(trades),
+        "sigma": f"{sigma:.2f}R",
+        "curva": [
+            {
+                "fraccion": f"{fraccion:.0%}",
+                "afectado": f"{valor.por_afectado:.2f}R",
+                "global": f"{valor.sobre_expectancy:.2f}R",
+            }
+            for fraccion, valor in curva_de_poder(trades, sigma=sigma)
+        ],
+        "capas": [
+            {
+                "capa": fila.capa,
+                "afectados": fila.n_afectados,
+                "fraccion": f"{fila.fraccion:.2f}",
+                "mde": f"{fila.mde_afectado:.2f}R",
+                "disponible": f"{fila.efecto_disponible:.2f}R",
+                "cota": fila.cota,
+                "veredicto": fila.veredicto,
+                "klass": "pos" if fila.medible else "neg",
+            }
+            for fila in poder_por_capa(trades, spy=result.spy_data, sigma=sigma)
+        ],
+        "sin_estimar": [
+            {"capa": capa, "motivo": motivo} for capa, motivo in SIN_ESTIMAR.items()
+        ],
+    }
+
+
 def period_note(result: BacktestResult) -> str:
     """Aviso cuando los datos no cubren el rango que pide el YAML.
 
@@ -431,6 +480,10 @@ def render_console(result: BacktestResult, manifest: dict | None = None) -> str:
             )
 
     for line in risk_unit_lines(result):
+        add(line)
+
+    add("")
+    for line in poder_lineas(result.rule_trades, spy=result.spy_data):
         add(line)
 
     for line in open_positions_lines(result):
@@ -569,6 +622,7 @@ def render_html(
         charts={"equity": equity_html, "drawdown": drawdown_html, "prices": price_charts},
         exit_breakdown=exit_breakdown(result.rule_trades_frame),
         risk_unit=risk_unit_lines(result)[3:],
+        poder=poder_contexto(result),
         open_positions=[
             {
                 "symbol": t.symbol,

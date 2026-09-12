@@ -81,6 +81,9 @@ class BacktestResult:
     #: buy & hold de SPY: la referencia de mercado que exige la regla de rigor 5
     spy: pd.Series | None = None
     spy_metrics: dict | None = None
+    #: las velas de SPY del período, que el filtro de régimen necesita para
+    #: estimar a cuántas entradas alcanzaría (ver backtest/poder.py)
+    spy_data: pd.DataFrame | None = None
     #: de dónde salió la serie de SPY, o por qué no está
     spy_note: str = ""
     #: SPY forma parte del universo, así que está contado dos veces
@@ -437,6 +440,7 @@ def run_backtest(
     )
 
     spy_series = spy_metrics = None
+    spy_data = None
     if spy_frame is not None and not spy_frame.empty:
         spy_sliced = spy_frame
         if start is not None:
@@ -452,6 +456,7 @@ def run_backtest(
                 start=bench_start,
             ).rename("spy")
             spy_metrics = compute_metrics(spy_series)
+            spy_data = spy_sliced
         else:
             spy_note = spy_note or "SPY no tiene velas en el rango del backtest"
 
@@ -482,6 +487,7 @@ def run_backtest(
         symbols=sorted(sliced),
         spy=spy_series,
         spy_metrics=spy_metrics,
+        spy_data=spy_data,
         spy_note=spy_note,
         spy_in_universe="SPY" in sliced,
         sizing_warnings=sizing_warnings,
