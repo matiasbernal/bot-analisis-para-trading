@@ -161,3 +161,46 @@ def test_yaml_roto(tmp_path):
     path.write_text("entry: [\n", encoding="utf-8")
     with pytest.raises(ConfigError, match="YAML inválido"):
         load_strategy(path)
+
+
+# --- el umbral en el que risk_pct deja de decidir el tamaño ----------------
+def test_umbral_de_sizing_es_risk_pct_sobre_max_position_pct(tmp_path):
+    config = load_strategy(write(tmp_path, risk={"max_position_pct": 20.0}))
+    assert config.sizing_threshold_pct == pytest.approx(5.0)
+
+    config = load_strategy(
+        write(tmp_path, risk={"position_sizing": {"risk_pct": 1.5}, "max_position_pct": 30.0})
+    )
+    assert config.sizing_threshold_pct == pytest.approx(5.0)  # 1.5/30 vuelve al mismo 5%
+
+
+def test_avisa_cuando_un_stop_porcentual_deja_risk_pct_decorativo(tmp_path):
+    """Con stop en %, la distancia se conoce al validar: el aviso sale de una."""
+    path = write(
+        tmp_path,
+        exits={"hard_stop": {"mode": "pct", "pct": 3.0}},
+        risk={"position_sizing": {"risk_pct": 1.0}, "max_position_pct": 20.0},
+    )
+    avisos = load_strategy(path).static_warnings()
+    assert len(avisos) == 1
+    assert "decorativo" in avisos[0] and "5.00%" in avisos[0]
+
+
+def test_no_avisa_cuando_el_stop_es_mas_ancho_que_el_umbral(tmp_path):
+    path = write(
+        tmp_path,
+        exits={"hard_stop": {"mode": "pct", "pct": 8.0}},
+        risk={"position_sizing": {"risk_pct": 1.0}, "max_position_pct": 20.0},
+    )
+    assert load_strategy(path).static_warnings() == []
+
+
+def test_el_aviso_es_aviso_y_no_error(tmp_path):
+    """Hay configuraciones donde que el tope mande es intencional."""
+    path = write(
+        tmp_path,
+        exits={"hard_stop": {"mode": "pct", "pct": 1.0}},
+        risk={"position_sizing": {"risk_pct": 2.0}, "max_position_pct": 10.0},
+    )
+    config = load_strategy(path)  # no levanta
+    assert config.static_warnings()

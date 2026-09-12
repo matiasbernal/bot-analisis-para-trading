@@ -265,6 +265,41 @@ class StrategyConfig(BaseModel):
             _validate_node(self.exits.signal, names, "exits.signal")
         return self
 
+    @property
+    def sizing_threshold_pct(self) -> float:
+        """Distancia al stop, en % del precio, debajo de la cual manda el tope.
+
+        El sizing por riesgo pide ``equity·risk_pct / distancia_al_stop`` acciones
+        y el tope de concentración permite ``equity·max_position_pct / precio``.
+        Igualando las dos:
+
+            el tope ata  <=>  distancia_al_stop / precio  <  risk_pct / max_position_pct
+
+        Con ``risk_pct: 1.0`` y ``max_position_pct: 20`` el umbral es 5%: cualquier
+        stop más cercano que eso hace que ``risk_pct`` no decida nada.
+        """
+        return self.risk.position_sizing.risk_pct / self.risk.max_position_pct * 100.0
+
+    def static_warnings(self) -> list[str]:
+        """Avisos que se pueden dar sin mirar los datos. No son errores.
+
+        Hay configuraciones donde que el tope mande es intencional (un universo
+        muy volátil, un stop deliberadamente ancho), así que esto avisa y sigue.
+        Con stops en ATR la distancia no se conoce hasta tener los datos: ese
+        aviso lo da el motor al arrancar el backtest.
+        """
+        avisos: list[str] = []
+        stop = self.exits.hard_stop
+        if stop.mode == "pct" and stop.pct is not None and stop.pct < self.sizing_threshold_pct:
+            avisos.append(
+                f"risk_pct queda decorativo: el stop está a {stop.pct:.2f}% del precio y el "
+                f"tope de concentración manda por debajo de "
+                f"risk_pct/max_position_pct = {self.sizing_threshold_pct:.2f}%. "
+                f"El tamaño lo va a decidir max_position_pct ({self.risk.max_position_pct}%), "
+                f"no risk_pct ({self.risk.position_sizing.risk_pct}%)."
+            )
+        return avisos
+
     def available_names(self) -> set[str]:
         """Nombres que una condición puede usar como operando."""
         names: set[str] = set(OHLCV_COLUMNS)

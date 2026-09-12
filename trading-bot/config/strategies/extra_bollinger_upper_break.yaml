@@ -37,7 +37,14 @@ execution:
 
 risk:
   position_sizing:    {mode: risk_pct, risk_pct: 1.0, on: current_equity}
-  max_position_pct:   25
+  # Tope de concentración. 30% y no 20% por una razón medida, no por gusto:
+  # el tope decide el tamaño (y risk_pct queda decorativo) cuando la distancia al
+  # stop es menor que risk_pct/max_position_pct. Con 1.0/20 ese umbral es 5%, y un
+  # stop de 2xATR sobre estos papeles está a ~4.4%: el tope ataba 21 de 31 trades y
+  # el riesgo real promedio caía a 0.78R. Con 1.0/30 el umbral baja a 3.33% y el
+  # riesgo vuelve a ~0.95R. Si cambiás risk_pct, revisá este número: el motor avisa
+  # cuando la combinación vuelve a dejar a risk_pct sin decidir nada.
+  max_position_pct:   30
   max_open_positions: 4
 
 backtest:

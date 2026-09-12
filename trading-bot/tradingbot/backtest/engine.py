@@ -59,6 +59,8 @@ class SymbolSeries:
     entry: np.ndarray
     exit_signal: np.ndarray
     atr: np.ndarray
+    #: distancia al stop en % del precio de cierre, barra a barra
+    stop_pct: np.ndarray
     position_of: dict[pd.Timestamp, int]
 
     def next_date(self, i: int) -> pd.Timestamp | None:
@@ -83,6 +85,8 @@ class BacktestResult:
     spy_note: str = ""
     #: SPY forma parte del universo, así que está contado dos veces
     spy_in_universe: bool = False
+    #: avisos sobre quién decide el tamaño de la posición (ver config.sizing_threshold_pct)
+    sizing_warnings: list[str] = field(default_factory=list)
     #: el rango pedido en el YAML, cuando los datos no llegan a cubrirlo
     period_requested: tuple[str, str] | None = None
     data_hash: str = ""
@@ -150,6 +154,13 @@ def prepare_symbol(
     else:
         atr = np.full(len(df), np.nan)
 
+    closes = df["close"].to_numpy(dtype="float64")
+    if hard_stop.mode == "atr":
+        stop_pct = hard_stop.multiple * atr / closes * 100.0
+    else:
+        stop_pct = np.full(len(df), float(hard_stop.pct or np.nan))
+    stop_pct[:warmup] = np.nan
+
     return SymbolSeries(
         symbol=symbol,
         index=df.index,
@@ -160,8 +171,38 @@ def prepare_symbol(
         entry=entry,
         exit_signal=exit_signal,
         atr=atr,
+        stop_pct=stop_pct,
         position_of={date: i for i, date in enumerate(df.index)},
     )
+
+
+def _sizing_warnings(
+    config: StrategyConfig, series: dict[str, SymbolSeries]
+) -> list[str]:
+    """Avisa cuando el tope de concentración, y no risk_pct, va a decidir el tamaño.
+
+    Con stops en ATR la distancia no se conoce hasta tener los datos, así que el
+    aviso se da acá y no en la validación del YAML. Es un aviso, no un error.
+    """
+    avisos = list(config.static_warnings())
+    umbral = config.sizing_threshold_pct
+
+    distancias = np.concatenate([s.stop_pct for s in series.values()])
+    distancias = distancias[np.isfinite(distancias)]
+    if len(distancias) == 0:
+        return avisos
+
+    mediana = float(np.median(distancias))
+    atados = float(np.mean(distancias < umbral))
+    if config.exits.hard_stop.mode == "atr" and atados > 0.5:
+        avisos.append(
+            f"risk_pct queda decorativo en buena parte de los trades: la distancia típica "
+            f"al stop es {mediana:.2f}% del precio y el tope de concentración manda por "
+            f"debajo de risk_pct/max_position_pct = {umbral:.2f}% "
+            f"({atados * 100:.0f}% de las barras). Subir max_position_pct o ensanchar el "
+            f"stop devuelve el control a risk_pct."
+        )
+    return avisos
 
 
 def run_backtest(
@@ -200,6 +241,8 @@ def run_backtest(
         symbol: prepare_symbol(config, symbol, df, lookahead=lookahead)
         for symbol, df in sliced.items()
     }
+
+    sizing_warnings = _sizing_warnings(config, series)
 
     index = pd.DatetimeIndex(sorted(set().union(*(s.index for s in series.values()))))
     costs = CostModel(
@@ -441,6 +484,7 @@ def run_backtest(
         spy_metrics=spy_metrics,
         spy_note=spy_note,
         spy_in_universe="SPY" in sliced,
+        sizing_warnings=sizing_warnings,
         period_requested=(
             str(config.backtest.start) if config.backtest.start else "",
             str(config.backtest.end) if config.backtest.end else "",

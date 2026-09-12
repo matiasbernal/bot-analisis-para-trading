@@ -209,6 +209,11 @@ def risk_unit_lines(result: BacktestResult) -> list[str]:
 
     riesgo_pct = result.config.risk.position_sizing.risk_pct
     ancho = 48
+    por_riesgo = int(result.metrics.get("sizing_by_risk", 0))
+    por_tope = int(result.metrics.get("sizing_by_cap", 0))
+    por_cash = int(result.metrics.get("sizing_by_cash", 0))
+    dimensionadas = por_riesgo + por_tope + por_cash
+
     lines = [
         "",
         "Unidad de riesgo",
@@ -221,6 +226,21 @@ def risk_unit_lines(result: BacktestResult) -> list[str]:
         f"  {'Retorno sobre riesgo desplegado (Σpnl/Σriesgo)':<{ancho}}"
         f"{result.metrics['return_on_risk'] * 100:+.2f}%",
     ]
+
+    if dimensionadas:
+        lines.append(
+            f"  {'Quién decidió el tamaño':<{ancho}}"
+            f"riesgo {por_riesgo}, tope {por_tope}, cash {por_cash} "
+            f"(de {dimensionadas} señales)"
+        )
+        if por_tope + por_cash:
+            lines.append(
+                f"       risk_pct NO decidió el tamaño en {por_tope + por_cash} de "
+                f"{dimensionadas} señales."
+            )
+
+    for aviso in result.sizing_warnings:
+        lines.append(f"  AVISO: {aviso}")
 
     ingenua = expectancy * declarado
     if declarado and abs(ingenua - en_plata) > 0.01 * max(abs(en_plata), 1.0):

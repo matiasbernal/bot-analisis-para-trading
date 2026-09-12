@@ -168,6 +168,39 @@ De ahí salen tres reglas que el resto del proyecto tiene que respetar:
 Cada `Trade` guarda `risk_amount` (el 1R realizado) y `risk_target` (el
 declarado al momento de la señal). Los dos van a la tabla de trades y al journal.
 
+### Cuándo `risk_pct` deja de decidir, y el sesgo que eso mete
+
+El tamaño sale del menor de tres números: el que pide el riesgo, el que permite
+`max_position_pct` y el que alcanza el cash. Igualando los dos primeros:
+
+> **el tope manda cuando la distancia al stop, en % del precio, es menor que
+> `risk_pct / max_position_pct`.**
+
+Con `risk_pct: 1.0` y `max_position_pct: 20` ese umbral es 5%, y un stop de
+2×ATR sobre estos papeles está a ~4.4%: el tope ataba 21 de 31 trades y
+`risk_pct` no decidía nada. Por eso las plantillas usan `max_position_pct: 30`
+(umbral 3.33%), y por eso **el motor avisa** cuando la combinación vuelve a
+dejar a `risk_pct` decorativo, e imprime en cada informe quién decidió el tamaño:
+
+```
+  Quién decidió el tamaño    riesgo 30, tope 1, cash 0 (de 31 señales)
+```
+
+**El sesgo que esto mete, y que ninguna opción evaluada arregla**: el tope ata
+cuando el stop está cerca, y el stop está cerca cuando el ATR es bajo. O sea que
+el motor arriesga **menos en los trades tranquilos y 1R completo en los
+volátiles**, que es exactamente al revés de lo deseable. Medido sobre el fixture:
+
+| tope | correlación riesgo↔distancia al stop | tercio de stops cercanos | tercio de lejanos |
+|---|---|---|---|
+| 20% | +0.92 | 0.596R | 0.938R |
+| 30% | +0.06 | 0.941R | 0.943R |
+
+Con el tope en 30% el sesgo está **dormido**, no resuelto: vuelve apenas el tope
+vuelva a atar (cuenta más chica, papeles más caros, stops más ajustados,
+`risk_pct` más alto). `test_riesgo_realizado.py` fija las dos mediciones para que
+se note si reaparece.
+
 ## El cotejo contra `backtesting.py`
 
 El motor es propio, así que se coteja contra una implementación independiente:
