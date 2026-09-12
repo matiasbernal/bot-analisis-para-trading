@@ -131,8 +131,15 @@ def prepare_symbol(
         entry = manana_sube
         exit_signal = ~manana_sube
 
+    # El warmup se descarta ACÁ, sobre las señales ya calculadas y antes de que
+    # el loop las vea: durante esas barras los indicadores existen pero todavía
+    # no valen (un RSI sembrado con catorce velas no coincide con ninguna
+    # referencia). Se enmascaran las dos señales, no solo la de entrada: hoy no
+    # se puede salir de una posición que no se pudo abrir, pero cuando la Fase 3
+    # agregue capas que leen indicadores al cierre nadie se va a acordar de esto.
     warmup = min(config.warmup_bars, len(entry))
     entry[:warmup] = False
+    exit_signal[:warmup] = False
 
     hard_stop = config.exits.hard_stop
     if hard_stop.mode == "atr":
