@@ -99,8 +99,11 @@ El orden en que conviene mirarlo:
    puede concluir nada; con menos de 100, que las conclusiones son débiles.
 2. **La columna de buy & hold.** Está al lado de cada métrica. Una estrategia que
    rinde menos que comprar y esperar no sirve, por linda que sea la curva.
-3. **Concentración del resultado.** Cuánto del P&L viene de los 5 mejores trades.
-   Si es el 80%, tuviste suerte dos veces.
+3. **Concentración del resultado.** "5 mejores vs. lo normal": cuánto aportan los
+   cinco mejores ganadores comparado con lo esperable para esa cantidad de
+   ganadores. 1.00× es normal; 1.30× significa que el resultado depende de un
+   puñado de operaciones. Con menos de 10 ganadores el informe avisa que el
+   número no se puede interpretar.
 4. **Racha máxima de pérdidas.** No es para el backtest, es para vos: si el
    histórico muestra 9 pérdidas seguidas, en vivo las vas a vivir.
 5. **Salidas por regla.** Qué porcentaje salió por stop, por objetivo y por señal,
@@ -143,21 +146,25 @@ Tres cosas que el informe dice y conviene no pasar por alto:
 **1R no vale lo que dice el YAML.** `risk_pct: 1.0` sobre $10.000 declara $100
 por trade, pero el riesgo que termina teniendo cada posición es
 `acciones × riesgo por acción`, y eso es menos: el tamaño se redondea a acciones
-enteras y, sobre todo, el tope de concentración recorta la posición. Medido
+enteras y, cuando el tope de concentración ata, recorta la posición. Medido
 sobre la plantilla `ema_cross` y el fixture (`scripts/riesgo_realizado.py`):
 
 ```
-min 0.54R   media 0.78R   max 0.99R   (nunca por encima de 1R)
+min 0.83R   media 0.95R   max 1.00R    con max_position_pct: 30 (la plantilla actual)
+min 0.54R   media 0.78R   max 0.99R    con max_position_pct: 20 (antes del bloque 2)
 ```
+
+Nunca por encima de 1R: el motor arriesga menos de lo declarado, jamás más.
 
 De ahí salen tres reglas que el resto del proyecto tiene que respetar:
 
 1. **La expectancy del plan sigue siendo la media de `pnl_r`** — "cuánto deja un
    trade típico", cada trade pesando igual. No se toca. Lo que **no** se puede
-   hacer es traducirla a plata multiplicando por el 1R declarado: sobre el
-   fixture esa cuenta da $25.09 por trade cuando el promedio real es $17.27, un
-   45% de más. Por eso el informe imprime las tres cosas juntas: expectancy en R,
-   expectancy en plata, y el 1R realizado promedio.
+   hacer es traducirla a plata multiplicando por el 1R declarado: con el tope en
+   20% esa cuenta daba $25.09 por trade cuando el promedio real era $17.27, un
+   45% de más. Por eso el informe imprime las tres cosas juntas —expectancy en R,
+   expectancy en plata y el 1R realizado promedio— y avisa cuando la lectura
+   ingenua se desvía.
 
 2. **Retorno sobre riesgo desplegado** (`Σ pnl / Σ riesgo real`) es otra métrica,
    no un reemplazo: pondera cada trade por la plata que puso en juego. Responde
@@ -181,6 +188,39 @@ De ahí salen tres reglas que el resto del proyecto tiene que respetar:
 
 Cada `Trade` guarda `risk_amount` (el 1R realizado) y `risk_target` (el
 declarado al momento de la señal). Los dos van a la tabla de trades y al journal.
+
+### Qué puede decir la alerta (decisión para la Fase 4)
+
+El plan define una alerta que imprime `Riesgo: 1.0R = $101`. Con la unidad real
+eso hay que reescribirlo, y la buena noticia es que **el riesgo en pesos sí se
+conoce la noche anterior**: la cantidad de acciones y el riesgo por acción se
+fijan al cierre de la señal, así que `acciones × riesgo por acción` es un número
+exacto antes de mandar la orden. Lo que **no** se conoce es el precio del stop,
+que se ancla al fill de la apertura.
+
+Formato decidido para la Fase 4 (todavía sin implementar):
+
+```
+🟢 ENTRADA · MSFT
+Mañana en apertura (orden MOO)
+
+Comprar: 13 acciones
+Riesgo:  $98.21  (0.98R de $100 declarado)
+Stop:    apertura − $7.55 por acción
+         ≈ $142.04 si abre como cerró
+Target:  apertura + $22.66  (3R)
+```
+
+Reglas del formato:
+
+- **El riesgo en pesos va exacto, sin "~"**, porque lo es. Al lado, cuánto es
+  contra el 1R declarado, para que se vea si el tope recortó la posición.
+- **El stop y el objetivo van como distancia, no como precio**: el precio exacto
+  depende de la apertura, y darlo redondo invita a cargar una orden de stop al
+  número equivocado. El precio estimado va abajo, marcado como estimación.
+- **Única excepción al "exacto"**: si el cash no alcanza al momento del fill, el
+  motor recorta las acciones. La alerta lo aclara cuando la posición usa más del
+  90% del cash disponible.
 
 ### Cuándo `risk_pct` deja de decidir, y el sesgo que eso mete
 

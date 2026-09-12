@@ -275,6 +275,14 @@ lo que evita que cinco operaciones correlacionadas se conviertan en una sola apu
 El backtest respeta estos límites igual que el `scan`, así que los resultados históricos
 reflejan las señales que **realmente** habrías podido tomar, no todas las que aparecieron.
 
+> **Corrección de la tanda 1 — la alerta y las rachas.** El riesgo en pesos de cada
+> señal SÍ se conoce la noche anterior (las acciones y el riesgo por acción se fijan al
+> cierre), así que la alerta puede imprimirlo exacto; lo que no se conoce es el precio
+> del stop, que se ancla al fill de la apertura y va como distancia, no como precio.
+> Y cualquier lectura tipo "cinco pérdidas seguidas son −5R" está inflada en la misma
+> proporción que la unidad: el informe publica el costo de la peor racha en plata.
+> Formato completo en `README.md`, "Qué puede decir la alerta".
+
 > **Corrección de la tanda 1 — cómo se calcula el heat.** Al cerrar la tanda 1 se midió
 > que el riesgo realizado de cada trade no es 1R: va de 0.54R a 0.99R (media 0.78R), porque
 > el tamaño se redondea a acciones enteras y el tope de concentración recorta posiciones.
