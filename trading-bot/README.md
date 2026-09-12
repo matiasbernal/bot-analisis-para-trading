@@ -104,6 +104,35 @@ tablas que scrollean solas, modo oscuro según el sistema.
 7. **Reproducibilidad**: cada corrida guarda un manifiesto con el YAML exacto, el
    hash de los datos y el commit. Dos corridas dan el mismo archivo.
 
+## El cotejo contra `backtesting.py`
+
+El motor es propio, así que se coteja contra una implementación independiente:
+la misma estrategia de cruce de medias en `backtesting.py` y acá
+(`tests/test_vs_backtesting.py`). **El cotejo que cuenta para la definición de
+terminado es el de comisión sola**, en dos escenarios: sin costos y con
+comisión del 0.05% por lado. En los dos, los cuatro símbolos quedan dentro del
+5% en CAGR, cantidad de trades y max drawdown.
+
+El slippage no se compara directo, y no es un detalle: el `spread` de
+`backtesting.py` se cobra **una vez por ida y vuelta** (ajusta la entrada y deja
+la salida sin tocar), mientras que nosotros lo aplicamos **en cada punta**, que
+es lo que exige la regla de rigor 3. Con `spread` activado el desvío de CAGR
+llega al 5.5% en SPY, y eso mide la diferencia entre los dos modelos, no un bug
+nuestro. Si dentro de seis meses ves un cotejo con spread que "falla", es este
+párrafo.
+
+Lo que queda de diferencia son dos decisiones nuestras, deliberadas:
+
+- **El sizing se calcula al cierre de la barra de la señal**, con `close[t]`
+  como estimación del precio de entrada, porque es lo único que se sabe cuando
+  se manda una orden market-on-open; en el fill solo se recorta si el cash no
+  alcanza. `backtesting.py` dimensiona en el fill, con `open[t+1]` ya conocido,
+  y por eso a veces entra con una acción más.
+- **La posición que sigue abierta cuando se acaban los datos se liquida al
+  cierre de la última vela** (consistente con la curva de equity, que es
+  mark-to-market al cierre). `backtesting.py` la cierra en la apertura de esa
+  vela. Ese trade no cuenta como operación del sistema: se reporta aparte.
+
 ## El archivo de estrategia
 
 Todo lo que se toca vive en el YAML; nada queda hardcodeado. Las plantillas están
