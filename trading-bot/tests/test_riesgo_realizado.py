@@ -163,3 +163,75 @@ def test_el_umbral_es_el_cociente_de_los_dos_parametros():
     config = load_strategy(PLANTILLA)
     assert config.sizing_threshold_pct == pytest.approx(1.0 / 30 * 100)
     assert config.static_warnings() == []  # stop en ATR: el aviso lo da el motor
+
+
+# --- el régimen que motivó todo esto, ejercitado -----------------------------
+@pytest.fixture(scope="module")
+def con_tope_20(universe_frames_module):
+    """La plantilla con el tope viejo: el estado en el que el aviso gritaba."""
+    datos = yaml.safe_load(open(PLANTILLA, encoding="utf-8"))
+    datos["risk"]["max_position_pct"] = 20
+    return run_backtest(StrategyConfig(**datos), universe_frames_module)
+
+
+def test_con_tope_20_el_aviso_aparece_completo(con_tope_20):
+    """Sin esto, nada del repo ejercita el aviso en el régimen que lo motivó."""
+    assert len(con_tope_20.sizing_warnings) == 1
+    aviso = con_tope_20.sizing_warnings[0]
+    assert "decorativo" in aviso
+    assert "5.00%" in aviso                      # risk_pct/max_position_pct
+    assert "4.55%" in aviso                      # distancia mediana al stop
+    assert "max_position_pct" in aviso and "risk_pct" in aviso
+
+
+def test_con_tope_20_el_contador_dice_21_de_31(con_tope_20):
+    m = con_tope_20.metrics
+    assert (m["sizing_by_risk"], m["sizing_by_cap"], m["sizing_by_cash"]) == (10, 21, 0)
+    assert m["sizing_by_cap"] + m["sizing_by_cash"] == 21
+    assert sum(m[k] for k in ("sizing_by_risk", "sizing_by_cap", "sizing_by_cash")) == 31
+
+
+def test_con_tope_20_la_lectura_ingenua_se_equivoca_45_por_ciento(con_tope_20):
+    """El número que justificó separar la unidad declarada de la realizada.
+
+    expectancy +0.251189R × $99.8929 declarados = $25.09 por trade
+    promedio real                                = $17.27 por trade
+    error = |25.09 / 17.27 − 1| = 45.3%
+    """
+    metricas = con_tope_20.metrics
+    trades = con_tope_20.rule_trades
+    declarado = sum(t.risk_target for t in trades) / len(trades)
+
+    assert declarado == pytest.approx(99.89, abs=0.05)
+    assert metricas["expectancy_money"] == pytest.approx(17.27, abs=0.05)
+    ingenua = metricas["expectancy_r"] * declarado
+    assert ingenua == pytest.approx(25.09, abs=0.05)
+    assert abs(ingenua / metricas["expectancy_money"] - 1) * 100 == pytest.approx(
+        45.3, abs=1.0
+    )
+
+
+def test_con_tope_20_el_informe_imprime_las_dos_cosas(con_tope_20):
+    from tradingbot.reporting.report import risk_unit_lines
+
+    texto = "\n".join(risk_unit_lines(con_tope_20))
+    assert "risk_pct NO decidió el tamaño en 21 de 31 señales" in texto
+    assert "AVISO:" in texto and "decorativo" in texto
+    assert "Esa lectura se equivoca 45%" in texto
+
+
+def test_con_la_plantilla_actual_nada_de_eso_aparece(medicion):
+    """El contraste: con tope 30 el aviso se calla y el error cae a un dígito."""
+    result, _ = medicion
+    from tradingbot.reporting.report import risk_unit_lines
+
+    texto = "\n".join(risk_unit_lines(result))
+    assert not result.sizing_warnings
+    assert "AVISO:" not in texto
+    assert result.metrics["sizing_by_cap"] <= 2
+
+    trades = result.rule_trades
+    declarado = sum(t.risk_target for t in trades) / len(trades)
+    ingenua = result.metrics["expectancy_r"] * declarado
+    error = abs(ingenua / result.metrics["expectancy_money"] - 1) * 100
+    assert error < 10
