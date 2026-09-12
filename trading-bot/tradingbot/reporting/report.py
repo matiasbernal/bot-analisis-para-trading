@@ -39,7 +39,7 @@ METRIC_ROWS: list[tuple[str, str, str, bool]] = [
     ("win_loss_ratio", "Ganancia/pérdida media", "num", False),
     ("n_trades", "Trades", "int", False),
     ("max_consecutive_losses", "Racha de pérdidas", "int", False),
-    ("top5_concentration", "Ganancia de los 5 mejores", "pct", False),
+    ("top5_concentration", "5 mejores / ganancia bruta", "pct", False),
     ("exposure_pct", "Días con posición", "pct", False),
 ]
 

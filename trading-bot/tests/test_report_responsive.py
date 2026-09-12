@@ -32,11 +32,16 @@ CHROMIUM_ENV = "TRADINGBOT_CHROMIUM"
 ANCHOS = [390, 412, 1280]
 
 
+def _saltear_si_falta_chromium() -> None:
+    """Se chequea ANTES de abrir playwright: saltear adentro deja ruido de teardown."""
+    explicito = os.environ.get(CHROMIUM_ENV)
+    if explicito and not Path(explicito).exists():
+        pytest.skip(f"{CHROMIUM_ENV}={explicito} no existe")
+
+
 def _launch(playwright):
     explicito = os.environ.get(CHROMIUM_ENV)
     if explicito:
-        if not Path(explicito).exists():
-            pytest.skip(f"{CHROMIUM_ENV}={explicito} no existe")
         return playwright.chromium.launch(executable_path=explicito)
     try:
         return playwright.chromium.launch()
@@ -98,6 +103,7 @@ def test_el_informe_de_consola_trae_el_benchmark_al_lado(informe):
 @pytest.mark.playwright
 @pytest.mark.parametrize("ancho", ANCHOS)
 def test_sin_scroll_horizontal(informe, ancho, tmp_path):
+    _saltear_si_falta_chromium()
     with sync_playwright() as playwright:
         browser = _launch(playwright)
         page = browser.new_page(viewport={"width": ancho, "height": 844})
@@ -116,6 +122,7 @@ def test_sin_scroll_horizontal(informe, ancho, tmp_path):
 
 @pytest.mark.playwright
 def test_a_390_los_graficos_entran_y_los_toques_son_alcanzables(informe):
+    _saltear_si_falta_chromium()
     with sync_playwright() as playwright:
         browser = _launch(playwright)
         page = browser.new_page(viewport={"width": 390, "height": 844})
