@@ -135,3 +135,70 @@ def test_la_ayuda_funciona():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "backtest" in result.output
+    assert "comparar" in result.output
+
+
+def _variante(tmp_path: Path, **cambios) -> Path:
+    """Copia de ema_cross.yaml con los cambios pedidos, para comparar contra ella."""
+    datos = yaml.safe_load((ROOT / "config/strategies/ema_cross.yaml").read_text("utf-8"))
+    for camino, valor in cambios.items():
+        nodo = datos
+        partes = camino.split(".")
+        for parte in partes[:-1]:
+            nodo = nodo[parte]
+        nodo[partes[-1]] = valor
+    destino = tmp_path / "variante.yaml"
+    destino.write_text(yaml.safe_dump(datos, sort_keys=False), encoding="utf-8")
+    return destino
+
+
+def test_comparar_contra_si_misma_no_encuentra_efecto(tmp_path):
+    """El control negativo del banco: comparar una estrategia consigo misma."""
+    result = runner.invoke(
+        app,
+        [
+            "comparar",
+            "--base", str(ROOT / "config/strategies/ema_cross.yaml"),
+            "--variante", str(ROOT / "config/strategies/ema_cross.yaml"),
+            "--data", str(ROOT / "tests/fixtures"),
+            "--replicas", "500",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "f = 0.000" in result.output
+    assert "no cambió ningún trade" in result.output
+
+
+def test_comparar_con_un_objetivo_distinto_mide_el_delta(tmp_path):
+    variante = _variante(tmp_path, **{"name": "rr_2", "exits.take_profit": {
+        "mode": "rr", "ratio": 2.0
+    }})
+    result = runner.invoke(
+        app,
+        [
+            "comparar",
+            "--base", str(ROOT / "config/strategies/ema_cross.yaml"),
+            "--variante", str(variante),
+            "--data", str(ROOT / "tests/fixtures"),
+            "--replicas", "500",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "delta pareado" in result.output
+    assert "delta sin parear" in result.output
+    assert "trades afectados" in result.output
+
+
+def test_comparar_rechaza_universos_distintos(tmp_path):
+    variante = _variante(tmp_path, universe=["SPY"])
+    result = runner.invoke(
+        app,
+        [
+            "comparar",
+            "--base", str(ROOT / "config/strategies/ema_cross.yaml"),
+            "--variante", str(variante),
+            "--data", str(ROOT / "tests/fixtures"),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "universos distintos" in result.output

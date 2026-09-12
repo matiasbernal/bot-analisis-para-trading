@@ -1,6 +1,11 @@
-"""CLI. En la tanda 1 hay un solo comando: ``backtest``.
+"""CLI. Dos comandos: ``backtest`` y ``comparar``.
 
     tradingbot backtest --strategy config/strategies/ema_cross.yaml --data tests/fixtures/
+    tradingbot comparar --base base.yaml --variante con_trailing.yaml --data tests/fixtures/
+
+``comparar`` es el banco del torneo de capas (PLAN.md): corre dos estrategias
+sobre los mismos datos, empareja los trades y devuelve el delta **con su
+incertidumbre**. Sin eso, "la capa mejora la expectancy" no es una medición.
 
 ``scan``, ``status``, ``fill``, ``optimize`` y ``report`` llegan en las tandas
 siguientes, sobre este mismo motor.
@@ -13,6 +18,9 @@ from typing import Optional
 
 import typer
 
+from tradingbot.backtest import ab
+from tradingbot.backtest.ab import REPLICAS as AB_REPLICAS
+from tradingbot.backtest.ab import SEED as AB_SEED
 from tradingbot.backtest.engine import run_backtest
 from tradingbot.backtest.manifest import build_manifest, save_manifest
 from tradingbot.config import ConfigError, load_settings, load_strategy
@@ -66,6 +74,40 @@ def _providers(provider, frames: dict) -> dict[str, str]:
     return {sym: _source_label(provider, sym) for sym in sorted(frames)}
 
 
+def _cargar(config, universe: list[str], provider, cache, offline: bool):
+    """Carga el universo y devuelve ``(frames, load)``. El load sirve para SPY."""
+
+    def load(sym: str):
+        if cache is not None:
+            return cache.get(
+                sym,
+                start=config.backtest.start,
+                end=config.backtest.end,
+                interval=config.interval,
+                offline=offline,
+            )
+        return provider.get_ohlcv(
+            sym,
+            start=config.backtest.start,
+            end=config.backtest.end,
+            interval=config.interval,
+        )
+
+    frames = {}
+    for sym in universe:
+        try:
+            frames[sym] = load(sym)
+        except DataValidationError as exc:
+            typer.secho(f"  ! {sym}: {exc}", fg=typer.colors.YELLOW, err=True)
+
+    if not frames:
+        typer.secho(
+            "No se pudo cargar ningún símbolo del universo.", fg=typer.colors.RED, err=True
+        )
+        raise typer.Exit(code=1)
+    return frames, load
+
+
 def _load_spy(frames: dict, load, provider) -> tuple[object | None, str]:
     """La serie de SPY para el benchmark de mercado, con su rótulo o su motivo."""
     if SPY in frames:
@@ -106,35 +148,7 @@ def backtest(
 
     universe = [s.upper() for s in symbol] if symbol else config.universe
     provider, cache = _provider(data, settings)
-
-    def load(sym: str):
-        if cache is not None:
-            return cache.get(
-                sym,
-                start=config.backtest.start,
-                end=config.backtest.end,
-                interval=config.interval,
-                offline=offline,
-            )
-        return provider.get_ohlcv(
-            sym,
-            start=config.backtest.start,
-            end=config.backtest.end,
-            interval=config.interval,
-        )
-
-    frames = {}
-    for sym in universe:
-        try:
-            frames[sym] = load(sym)
-        except DataValidationError as exc:
-            typer.secho(f"  ! {sym}: {exc}", fg=typer.colors.YELLOW, err=True)
-
-    if not frames:
-        typer.secho(
-            "No se pudo cargar ningún símbolo del universo.", fg=typer.colors.RED, err=True
-        )
-        raise typer.Exit(code=1)
+    frames, load = _cargar(config, universe, provider, cache, offline)
 
     # SPY se descarga siempre, esté o no en el universo: la regla de rigor 5
     # pide comparar contra el mercado, no solo contra el propio universo
@@ -152,6 +166,57 @@ def backtest(
         typer.echo(f"\nInforme HTML: {path}")
     if manifest_path is not None:
         typer.echo(f"Manifiesto:   {save_manifest(manifest, manifest_path)}")
+
+
+@app.command()
+def comparar(
+    base: Path = typer.Option(..., "--base", "-b", help="YAML de la estrategia base."),
+    variante: Path = typer.Option(..., "--variante", "-v", help="YAML de la variante."),
+    data: Optional[Path] = typer.Option(
+        None, "--data", "-d", help="Directorio con CSV locales (fixtures)."
+    ),
+    settings: Optional[Path] = typer.Option(None, "--settings", help="config/settings.yaml"),
+    seed: int = typer.Option(AB_SEED, "--seed", help="Semilla del bootstrap."),
+    replicas: int = typer.Option(AB_REPLICAS, "--replicas", help="Réplicas del bootstrap."),
+    offline: bool = typer.Option(False, "--offline", help="No descargar: usar solo el cache."),
+) -> None:
+    """Compara dos estrategias sobre los mismos datos, con incertidumbre.
+
+    Es el banco del torneo de capas: empareja los trades por (símbolo, fecha de
+    entrada) y devuelve el delta de expectancy con su intervalo, más el veredicto
+    que aplica las dos reglas de desempate del PLAN.
+    """
+    try:
+        config_base = load_strategy(base)
+        config_variante = load_strategy(variante)
+    except ConfigError as exc:
+        typer.secho(f"Configuración inválida:\n{exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    if sorted(config_base.universe) != sorted(config_variante.universe):
+        typer.secho(
+            "Las dos estrategias tienen universos distintos: el delta mediría el "
+            "universo y no la capa.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    provider, cache = _provider(data, settings)
+    frames, _ = _cargar(config_base, config_base.universe, provider, cache, offline)
+
+    resultado_base = run_backtest(config_base, frames)
+    resultado_variante = run_backtest(config_variante, frames)
+
+    comparacion = ab.comparar(
+        resultado_base,
+        resultado_variante,
+        etiqueta_base=config_base.name,
+        etiqueta_variante=config_variante.name,
+        seed=seed,
+        replicas=replicas,
+    )
+    typer.echo("\n".join(comparacion.lineas()))
 
 
 def main() -> None:
