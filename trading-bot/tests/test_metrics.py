@@ -490,6 +490,56 @@ def test_los_episodios_traen_pico_valle_y_recuperacion(equity):
     assert episodio["days"] == 10
 
 
+def test_sobre_una_plantilla_del_repo_las_dos_duraciones_difieren_de_verdad():
+    """Las dos filas del informe no son la misma fila: hay una plantilla que lo muestra.
+
+    El caso a mano de arriba prueba que se calculan distinto, pero en el informe
+    de `ema_cross` v3 las dos dan 556 d en las tres columnas, y dos filas que
+    siempre coinciden invitan a borrar una. La que las separa es la plantilla sin
+    trailing (la calibración v2):
+
+        Max drawdown         -5.51%
+        Duración de ese DD    371 d   <- el episodio que llega al -5.51%
+        DD más largo          385 d   <- otro episodio, menos hondo y más largo
+
+    Son dos episodios distintos, y está verificado a mano en ESTADO.md sección 9:
+    el de 385 d va de 2018-11-02 a 2019-11-22 y el de 371 d de 2020-01-14 a
+    2021-01-19. Si alguien "simplifica" una de las dos filas viendo el 556/556 de
+    la v3, este test se pone en rojo.
+    """
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    from fixtures.synthetic import synthetic_universe
+
+    from tradingbot.backtest.engine import run_backtest
+    from tradingbot.config import load_strategy
+    from tradingbot.data.validate import validate_ohlcv
+
+    config = load_strategy("config/strategies/ema_cross_sin_trailing.yaml")
+    frames = {
+        s: validate_ohlcv(df, s) for s, df in synthetic_universe(config.universe).items()
+    }
+    resultado = run_backtest(config, frames)
+
+    hondo = resultado.metrics["deepest_drawdown_days"]
+    largo = resultado.metrics["max_drawdown_days"]
+    assert hondo == 371
+    assert largo == 385
+    assert largo > hondo, (
+        "el drawdown más largo tiene que poder ser otro episodio que el más "
+        "profundo; si esto empieza a coincidir siempre, una de las dos filas sobra"
+    )
+
+    # y el más profundo es, efectivamente, el que mide el MDD
+    episodios = drawdown_episodes(resultado.equity)
+    mas_hondo = min(episodios, key=lambda e: e["depth"])
+    assert mas_hondo["days"] == hondo
+    assert mas_hondo["depth"] == pytest.approx(resultado.metrics["max_drawdown"])
+    assert max(e["days"] for e in episodios) == largo
+
+
 def test_un_drawdown_que_no_recupera_se_cuenta_hasta_el_final():
     serie = pd.Series(
         [100.0, 90.0, 80.0, 85.0],
