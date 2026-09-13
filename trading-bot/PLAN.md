@@ -230,8 +230,10 @@ exits:                         # ver sección "Gestión de la posición abierta"
     any:
       - {left: ema_fast, op: crosses_below, right: ema_slow}
   hard_stop:     {mode: atr, multiple: 2.0}
-  trailing_stop: {mode: chandelier, multiple: 3.0, activate_after_r: 1.0}
-  # Las demás capas quedan apagadas en las plantillas. Se prenden de a una, midiendo.
+  take_profit:   {mode: rr, ratio: 3.0}
+  # Las demás capas —el trailing incluido— quedan apagadas en las plantillas. Se prenden
+  # de a una, midiendo. (2026-09-13: el trailing dejó de ser línea base y pasó a ser
+  # candidata del torneo. El motivo, medido, está en "El torneo de capas".)
 
 execution:
   signal_on:      close          # la regla se evalúa con la vela CERRADA
@@ -311,10 +313,20 @@ Viven en `strategy/position.py` (estado de cada posición abierta) y `strategy/e
 
 **Advertencia antes de la lista.** Siete capas suman ~25 parámetros. Un sistema con 25
 parámetros de salida se puede ajustar para que cualquier histórico dé lindo, y eso no es una
-estrategia, es una curva dibujada a mano. La regla es: **las plantillas arrancan con dos capas
-prendidas (hard stop + trailing). Cada capa adicional se prende sola, se mide con la atribución
-de salidas, y se queda solo si mejora la expectancy contra la línea base.** Si dos capas hacen
-lo mismo (giveback y trailing chandelier se pisan bastante), se elige una.
+estrategia, es una curva dibujada a mano. La regla es: **las plantillas arrancan con la línea
+base prendida (hard stop + take profit). Cada capa adicional —el trailing chandelier
+incluido— se prende sola, se mide con la atribución de salidas, y se queda solo si gana el
+torneo contra la línea base.** Si dos capas hacen lo mismo (giveback y trailing chandelier se
+pisan bastante), se elige una; las dos compiten por ese lugar y ninguna lo tiene reservado.
+
+> **Corrección (2026-09-13) — la línea base era de tres capas y ahora es de dos.** La versión
+> original decía "arrancan con dos capas prendidas (hard stop + trailing)", con el objetivo
+> dado por supuesto. Al medir el poder del torneo sobre esa línea base salió que prenderla
+> deja **cero capas medibles** de las cuatro estimables, `break_even` incluida, que con el
+> trailing prendido tiene un efecto disponible de 0.16R contra un MDE de 0.43R: no se
+> distingue del ruido ni capturando el 100% de su mejor caso. El trailing pasó a ser
+> candidata del torneo. El fundamento completo, con los dos números que lo motivaron, está
+> en "El trailing dejó de ser línea base", más abajo.
 
 > **Corrección (2026-09-12).** La versión original de esta regla decía "si mejora la
 > expectancy **fuera de muestra**". Aplicada capa por capa, esa regla se contradice con la
@@ -862,12 +874,111 @@ capa sea medible:
 |---|---|---|
 | **2A** | Estado de la posición abierta (`position.py`), el banco de comparación A/B con bootstrap pareado por trade, el poder de medición publicado por capa, y `trailing_stop` chandelier | El estado es el piso de cuatro capas, no una capa. El banco y el poder son el instrumento: sin ellos "se queda si mejora" no se puede ejecutar. **El poder se publica antes de escribir la primera capa**: si no alcanza, lo que cambia es el plan de la tanda, y es más barato saberlo con una capa escrita que con seis |
 | **2B** | Riesgo de cartera: heat total en pesos, `max_per_group`, cortacircuito por drawdown | Va **antes** del torneo, no después: el riesgo de cartera cambia el tamaño de las posiciones, y el tamaño cambia toda expectancy en pesos y todo drawdown. Si el torneo corre primero, las seis mediciones quedan obsoletas el día que entra el heat y hay que repetirlas |
-| **2C** | El torneo: `break_even`, `time_stop`, `giveback`, `reversal`, `market_regime`, de a una y en ese orden, más la pasada final de reevaluación | Orden por grados de libertad creciente, para gastar el in-sample en las decisiones baratas primero. `giveback` se mide **contra** el trailing ya fijo, que es donde el "si dos capas hacen lo mismo, se elige una" deja de ser una frase y pasa a ser un número |
+| **2C** | El torneo: `break_even`, `time_stop`, `giveback`, `trailing_stop`, `reversal`, `market_regime`, de a una y en ese orden, más la pasada final de reevaluación | Orden por grados de libertad creciente, para gastar el in-sample en las decisiones baratas primero. Acá ese orden coincide con el de **consumo de efecto disponible**, así que la capa más agresiva queda al final y no antes. `trailing_stop` y `giveback` se pisan, y el orden decide cuál se mide contra cuál: `giveback` va primero por ser la más barata de las dos |
 
-`trailing_stop` entra en 2A **como línea base y no como candidata**: la regla de las
-plantillas dice que arrancan con dos capas prendidas (hard stop + trailing), así que el
-trailing no compite en el torneo, es lo que el resto tiene que superar. `event_risk` queda
-fuera de 2C por la red, con la decisión escrita arriba.
+`trailing_stop` **se construye en 2A pero se decide en 2C**, como cualquier otra capa. Entra
+en 2A porque el estado de la posición abierta y el banco A/B son su instrumento y porque el
+torneo necesita una capa escrita para calibrarse; lo que **no** hace es entrar prendida. Las
+plantillas arrancan sin ella. `event_risk` queda fuera de 2C por la red, con la decisión
+escrita arriba.
+
+#### El trailing dejó de ser línea base
+
+*(Decidido el 2026-09-13, sobre el análisis de `ESTADO.md` §12. **Es consecuencia de una
+medición, no de una preferencia**, y el número está abajo para que no se relea como otra
+cosa.)*
+
+**El número que lo motivó.** Con el trailing chandelier prendido como línea base, proyectado
+a n=230 y con el corte de exigencia de ~1/3, **ninguna de las cuatro capas estimables del
+torneo queda medible**. El caso extremo es `break_even`: su efecto disponible cae de **0.99R
+a 0.16R** (independiente) y de 0.99R a 0.27R (correlacionado), contra un MDE de 0.43R, así
+que deja de distinguirse del ruido incluso capturando el 100% de su mejor caso. `time_stop`,
+que sin trailing era la mejor candidata del torneo con una exigencia del 23-27%, pasa a
+necesitar el 66/43%. El mecanismo no es ruido y está medido: **σ baja** (1.43R → 1.18R), el
+chandelier comprime la distribución y el MDE por trade afectado mejora. Lo que se derrumba es
+el denominador. Medir se volvió más fácil y no alcanzó, porque quedó mucho menos para medir.
+
+**Qué cambia, en una línea:** el trailing no se apaga y no se recalibra. **Cambia de
+estatus.** Pasa de línea base a candidata del torneo, y la línea base pasa a ser **hard stop
++ take profit solamente**.
+
+Las dos cosas que quedan explícitamente descartadas, para que no vuelvan por la ventana:
+
+- **Apagarlo** no: el banco A/B da empate y el contrafáctico muestra que la capa acierta en
+  el 59-71% de los trades que toca. No hay evidencia de que reste; hay evidencia de que no se
+  sabe, que es distinto.
+- **Recalibrarlo** tampoco: la grilla de `multiple` × `activate_after_r` identifica el
+  mecanismo pero no puede elegir el reemplazo, porque los dos universos sintéticos se
+  contradicen sobre el óptimo (2 ATR/0.5R es la mejor celda en el independiente y la peor en
+  el correlacionado). Elegir ahí sería elegir el generador. Si algún día se toca el
+  multiplicador, tiene que ser por un argumento estructural y no por esa tabla.
+
+**El argumento que decide, y es de asimetría y no de evidencia.** Una capa que compite puede
+terminar prendida —si gana, queda—, mientras que una capa que es línea base **no puede
+terminar apagada jamás**, porque nunca se la mide. Mientras ser línea base era gratis eso no
+importaba; ahora está medido y cuesta el torneo entero. **El default caro es el que no se
+puede revisar.**
+
+##### En qué posición del orden entra — las dos opciones, y cuál
+
+Si el trailing compite, hay que decir dónde. Es la capa que más efecto disponible consume, así
+que la posición no es un detalle de presentación: **decide cuántas de las otras quedan
+medibles.**
+
+**Opción A — primera, por ser la más agresiva.** El argumento a favor es que así se mide
+contra la línea base más limpia que va a existir, con todo su efecto disponible intacto, que
+es la condición en la que su exigencia es más baja (18% a n=315). El argumento en contra es
+decisivo: es justamente la capa con más efecto disponible (1.68R) y más fracción tocada
+(f = 0.53), o sea la que más probablemente gane, y si gana primero **el resto del torneo
+vuelve a medirse contra una línea base con trailing** — que es exactamente el estado que esta
+decisión vino a corregir, reintroducido por otro camino. Se habría cambiado el estatus de la
+capa sin cambiar ninguna de sus consecuencias.
+
+**Opción B — en el orden de grados de libertad, o sea después de `break_even`, `time_stop` y
+`giveback`.** El argumento en contra es que la deja medirse contra una línea base que ya se
+comió parte de lo que ella tenía para capturar, así que puede salir no medible. El argumento
+a favor es que **esa es la asimetría correcta**: la capa con más grados de libertad (modo
+categórico de cuatro valores, multiplicador, activación y período de ATR) y más agresión es
+la que tiene que probarse contra una casa llena, no la que elige primero.
+
+**Recomendado: opción B.** Tres razones, en orden de peso:
+
+1. **Los dos criterios coinciden, así que no hay que inventar uno nuevo.** El PLAN ya ordena
+   el torneo por grados de libertad crecientes. Medido sobre los fixtures, el consumo de
+   efecto disponible de cada capa (`f × efecto disponible`, que es la R por trade de cartera
+   que la capa se lleva si se prende) ordena casi igual, y deja al trailing último en los dos
+   universos y con las dos líneas base:
+
+   | capa | consumo, indep. (4) | consumo, corr. (10) |
+   |---|---|---|
+   | `market_regime` | 0.20R | 0.15R |
+   | `break_even` | 0.23R | 0.19R |
+   | `giveback` | 0.28R | 0.40R |
+   | `time_stop` | 0.82R | 0.67R |
+   | **`trailing_stop`** | **0.90R** | **0.90R** |
+
+   Poner el trailing primero pediría un criterio propio para él solo, y el único disponible
+   —"es el default de hoy"— es el que acaba de quedar descartado.
+2. **Es la única de las tres tablas del proyecto en la que los dos universos sintéticos no se
+   contradicen.** La grilla de parámetros da órdenes opuestos según el fixture y por eso no
+   decide nada; el ranking de consumo da el mismo orden en los dos, y el trailing queda
+   último en los dos por un margen grande (0.90R contra 0.67-0.82R del segundo). Un orden que
+   sobrevive al cambio de generador es un orden que se puede defender.
+3. **El costo de equivocarse es asimétrico.** Si el trailing va último y sale no medible,
+   queda apagado como NO EVALUADA y vuelve el día que haya más datos, con las otras cuatro ya
+   decididas. Si va primero y gana, las otras cuatro quedan sin decidir **y sin registro de
+   por qué**, porque el motivo no sería la capa sino el orden.
+
+**El orden del torneo queda entonces así**, y va registrado con el resultado como exige la
+sección de abajo:
+
+    break_even → time_stop → giveback → trailing_stop → reversal → market_regime
+
+Una consecuencia que hay que escribir porque invierte una frase del loteo: la tabla de 2C
+decía que `giveback` se mide **contra el trailing ya fijo**. Ahora es al revés — `giveback`
+va antes y el trailing se mide contra ella. El "si dos capas hacen lo mismo, se elige una"
+sigue siendo un número y no una frase; lo que cambió es cuál de las dos tiene que probar que
+agrega algo sobre la otra, y le toca a la que tiene más parámetros.
 
 #### Lo que el loteo todavía no decía: con datos reales el torneo no decide casi nada
 

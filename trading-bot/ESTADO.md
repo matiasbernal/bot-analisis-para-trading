@@ -43,7 +43,8 @@ resuelta el 2026-09-12 y **la decisión está escrita en `PLAN.md`**, en la secc
 
 - **2A**: estado de la posición abierta, el banco de comparación A/B con bootstrap
   pareado por trade, el poder de medición publicado **por capa**, y `trailing_stop`
-  como línea base (no como candidata: el plan ya la declara prendida).
+  escrito. **Escrito, no prendido**: desde el 2026-09-13 el trailing es candidata
+  del torneo de 2C y la línea base es hard stop + take profit (sección 12).
 - **2B**: riesgo de cartera. Va en el medio y no al final porque cambia el tamaño
   de las posiciones, y el tamaño cambia toda expectancy en pesos: si el torneo
   corre primero, sus mediciones quedan obsoletas el día que entra el heat.
@@ -140,9 +141,11 @@ que es un test de cordura del motor, no evidencia sobre una regla.
 - Un test que dijera "con el trailing la expectancy sube 0.2R, así que el
   trailing aporta" sería ilegítimo, aunque estuviera en verde. **No hay ninguno
   y no tiene que haberlo.**
-- Por eso `trailing_stop` entra en 2A **por decisión de diseño del PLAN** (línea
-  base de las plantillas) y no como capa validada, y el informe lo dice donde
-  aparece el trailing.
+- Por eso `trailing_stop` se **escribió** en 2A sin estar validado, y el informe
+  lo dice donde aparece el trailing. Hasta el 2026-09-13 además entraba
+  *prendido*, por decisión de diseño del PLAN; desde esa fecha es candidata del
+  torneo como cualquier otra capa (sección 12). Lo que no cambió es esto: sobre
+  series sintéticas su aporte no se puede decidir ni con más trades.
 - Y por eso 2C —el torneo— **está parado hasta que haya CSV reales**, aunque el
   banco A/B y el módulo de poder ya funcionen. El instrumento está listo; lo que
   falta no es instrumento, es mercado.
@@ -654,11 +657,20 @@ próxima vez que aparezca un 300% nadie tenga que redescubrir por qué.
 
 ---
 
-## 12. El trailing como línea base: el análisis, sin la decisión
+## 12. El trailing como línea base: el análisis, y la decisión que salió de él
 
-**Nada de esta sección está implementado y el PLAN no se tocó.** Es el análisis
-que pidió el usuario para decidir él. La plantilla `ema_cross.yaml` sigue en v3
-con el chandelier de 3 ATR y `activate_after_r: 1.0`.
+> **Decidido el 2026-09-13: el trailing pasa a ser candidata del torneo.** No se
+> apaga y no se recalibra: **cambia de estatus**. La línea base pasa a ser hard
+> stop + take profit solamente. El cambio está escrito en `PLAN.md`, en "El
+> trailing dejó de ser línea base", junto con la posición que ocupa en el orden
+> del torneo (después de `break_even`, `time_stop` y `giveback`) y el argumento
+> de por qué ahí y no primero. Lo que sigue de esta sección es el análisis que
+> sostiene esa decisión, tal como se escribió antes de tomarla.
+>
+> **Lo que todavía NO está hecho**: la plantilla `ema_cross.yaml` sigue en v3 con
+> el chandelier prendido. Apagarlo es un cambio de calibración —sube
+> `calibration.version`, cambia todos los números del informe y hay tests que los
+> fijan— y va con el código de 2C, no con el PLAN.
 
 La pregunta: el PLAN declara `trailing_stop` línea base ("las plantillas arrancan
 con dos capas prendidas"), pero eso se escribió **antes de medir nada**, y el
@@ -750,7 +762,7 @@ Dicho de otro modo: **el barrido y el contrafáctico no dicen que el trailing se
 malo. Dicen que la combinación (trailing armado en +1R, objetivo en 3R) le exige
 una tasa de acierto alta, y cuál es la tasa real no se puede saber acá.**
 
-### 12.3 La recomendación
+### 12.3 La recomendación — aceptada el 2026-09-13
 
 **Que el trailing pase a ser candidata del torneo, no que se apague ni que se
 recalibre.** El razonamiento, en orden:
@@ -775,15 +787,17 @@ recalibre.** El razonamiento, en orden:
    apagada jamás**, porque nunca se la mide. Con los grados de libertad que hay,
    el default caro es el que no se puede revisar.
 
-**Qué implicaría, para dimensionarlo** (y no se hace hasta que lo decidas):
-`trailing_stop` entra al orden del torneo de 2C, la línea base pasa a ser hard
-stop + take profit solos, y la §1.2 vuelve a la columna "sin trailing", donde
-`time_stop` necesita el 23-27% y el torneo tiene al menos una capa decidible. Las
-plantillas arrancarían con el trailing apagado hasta que gane, con el motivo
-escrito, como cualquier otra capa. El costo es que contradice una regla del PLAN
-escrita explícitamente, y por eso la decisión no es mía.
+**Qué implica, ya decidido**: `trailing_stop` entra al orden del torneo de 2C, la
+línea base pasa a ser hard stop + take profit solos, y la §1.2 del PLAN vuelve a
+la columna "sin trailing". Las plantillas arrancan con el trailing apagado hasta
+que gane, con el motivo escrito, como cualquier otra capa. El costo es que
+contradice una regla del PLAN escrita explícitamente, y por eso la decisión fue
+del usuario y no de la sesión que hizo el análisis.
 
-**Lo que NO recomiendo**, para que quede dicho: tomar cualquiera de estas
-decisiones antes de tener los CSV reales. Todo lo de arriba dimensiona el
-problema y ordena los argumentos; el número que decide —cuántos trades que
-llegan a +1R siguen hasta +3R— es una propiedad del mercado y no existe todavía.
+**Lo que el análisis NO recomendaba**, y conviene tenerlo presente porque la
+decisión se tomó igual y con razón: apagar o recalibrar el trailing antes de
+tener los CSV reales. Cambiar de **estatus** no es ninguna de las dos cosas —no
+resuelve si el trailing aporta, **habilita** que se mida—, así que no depende del
+número que falta. El número que decide si el trailing se queda —cuántos trades
+que llegan a +1R siguen hasta +3R— es una propiedad del mercado y sigue sin
+existir; por eso el trailing queda como candidata y no como capa descartada.
