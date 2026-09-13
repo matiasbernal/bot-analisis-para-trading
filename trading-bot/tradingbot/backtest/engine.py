@@ -8,11 +8,18 @@ Para cada fecha ``t`` del índice unificado (PLAN.md, "Contratos entre capas"):
    apertura; si no, ``low[t] <= stop`` -> salida al stop; si no,
    ``high[t] >= objetivo`` -> salida al objetivo. Stop antes que objetivo:
    si los dos se tocan en la misma vela, gana el stop.
-3. **Cierre de t**: se actualizan excursiones y barras, y se evalúan entradas y
-   salidas por regla **con la vela ya cerrada** -> órdenes pendientes para
-   ``t+1``. Si hay más entradas que lugares, se ordenan por símbolo
-   (determinístico).
-4. Se registra la equity a ``close[t]`` (mark-to-market).
+3. **Cierre de t**: se actualizan excursiones y barras, se recalcula el nivel
+   del trailing (que rige recién desde ``t+1``: usar el ``high`` de ``t`` para
+   moverlo y compararlo contra el ``low`` de ``t`` sería mirar adentro de la
+   barra), y se evalúan entradas y salidas por regla **con la vela ya cerrada**
+   -> órdenes pendientes para ``t+1``. Si hay más entradas que lugares, se
+   ordenan por símbolo (determinístico).
+4. Se registra la equity a ``close[t]`` (mark-to-market) y el heat de cartera.
+
+Los cortacircuitos de la tanda 2B se evalúan dentro del paso 3, con la equity de
+ese cierre y **antes** de mirar las entradas: si se evaluaran después, el freno
+regiría recién para las señales del día siguiente y esta noche saldría una orden
+más. El del pico, además, manda a vender todo en la apertura de ``t+1``.
 
 De ahí sale la regla de oro: la señal se evalúa al cierre de ``t`` y se ejecuta
 en la apertura de ``t+1``. Nunca se usa un dato de ``t+1`` para decidir en ``t``.
@@ -31,6 +38,7 @@ from tradingbot.backtest.portfolio import Portfolio, Rejection, Trade, buy_and_h
 from tradingbot.config import StrategyConfig
 from tradingbot.indicators.registry import compute_indicator
 from tradingbot.strategy import exits as exit_rules
+from tradingbot.strategy import portfolio_risk
 from tradingbot.strategy.engine import build_context, signals_for
 from tradingbot.strategy.risk import size_position
 
@@ -44,6 +52,15 @@ class PendingOrder:
     risk_per_share: float = 0.0
     risk_target: float = 0.0
     reasons: list[str] = field(default_factory=list)
+
+    @property
+    def risk_amount(self) -> float:
+        """Riesgo en pesos que esta orden ya comprometió, aunque no se haya llenado.
+
+        El heat lo cuenta: si no lo contara, cinco señales de la misma noche
+        pasarían las cinco, porque ninguna ve a las otras.
+        """
+        return self.shares * self.risk_per_share if self.side == "buy" else 0.0
 
 
 @dataclass
@@ -59,6 +76,9 @@ class SymbolSeries:
     entry: np.ndarray
     exit_signal: np.ndarray
     atr: np.ndarray
+    #: ATR con el que se calcula el nivel del trailing (puede tener otro período
+    #: que el del hard stop). Todo NaN cuando la capa está apagada.
+    atr_trailing: np.ndarray
     #: distancia al stop en % del precio de cierre, barra a barra
     stop_pct: np.ndarray
     position_of: dict[pd.Timestamp, int]
@@ -88,6 +108,8 @@ class BacktestResult:
     spy_note: str = ""
     #: SPY forma parte del universo, así que está contado dos veces
     spy_in_universe: bool = False
+    #: heat de cartera al cierre de cada vela, como fracción del equity
+    portfolio_heat: pd.Series | None = None
     #: avisos sobre quién decide el tamaño de la posición (ver config.sizing_threshold_pct)
     sizing_warnings: list[str] = field(default_factory=list)
     #: el rango pedido en el YAML, cuando los datos no llegan a cubrirlo
@@ -157,12 +179,30 @@ def prepare_symbol(
     else:
         atr = np.full(len(df), np.nan)
 
+    # El trailing puede pedir otro período de ATR que el hard stop, así que se
+    # calcula aparte y no se reusa el de arriba salvo que coincidan. Se enmascara
+    # el warmup igual que las señales: un ATR sembrado con catorce velas movería
+    # el stop a un nivel que no vale.
+    trailing = config.exits.trailing_stop
+    if trailing is not None and trailing.enabled:
+        if hard_stop.mode == "atr" and trailing.atr_period == hard_stop.atr_period:
+            atr_trailing = atr
+        else:
+            atr_trailing = compute_indicator(
+                "atr", df, {"period": trailing.atr_period}
+            ).to_numpy(dtype="float64")
+    else:
+        atr_trailing = np.full(len(df), np.nan)
+
     closes = df["close"].to_numpy(dtype="float64")
     if hard_stop.mode == "atr":
         stop_pct = hard_stop.multiple * atr / closes * 100.0
     else:
         stop_pct = np.full(len(df), float(hard_stop.pct or np.nan))
     stop_pct[:warmup] = np.nan
+
+    atr_trailing = atr_trailing.copy()
+    atr_trailing[:warmup] = np.nan
 
     return SymbolSeries(
         symbol=symbol,
@@ -174,6 +214,7 @@ def prepare_symbol(
         entry=entry,
         exit_signal=exit_signal,
         atr=atr,
+        atr_trailing=atr_trailing,
         stop_pct=stop_pct,
         position_of={date: i for i, date in enumerate(df.index)},
     )
@@ -208,6 +249,27 @@ def _sizing_warnings(
     return avisos
 
 
+def _mover_trailing(position, trailing, atr_value: float) -> None:
+    """Arma el trailing y sube el stop al nivel del chandelier. Se llama al cierre.
+
+    Dos pasos separados a propósito: **armar** es de una sola vía (una vez que el
+    trade llegó a ``activate_after_r`` la capa queda activa aunque el precio
+    vuelva) y **mover** puede fallar cada vela sin que eso desarme nada. El stop
+    lo mueve ``raise_stop``, que solo acepta niveles mejores: por eso un
+    chandelier que baja —porque el ATR se agrandó— no baja el stop, se ignora.
+
+    El nivel calculado acá rige desde la vela **siguiente**: se calcula con el
+    máximo y el ATR de la vela que acaba de cerrar, y el motor lo evalúa contra el
+    ``low`` de la próxima, en el nivel 2 del orden intrabar.
+    """
+    if not position.arm_when("trailing_stop", trailing.activate_after_r):
+        return
+    nivel = exit_rules.chandelier_stop(
+        position.peak_price, atr_value, trailing.multiple, position.direction
+    )
+    position.raise_stop(nivel, source=exit_rules.REASON_TRAILING)
+
+
 def run_backtest(
     config: StrategyConfig,
     frames: dict[str, pd.DataFrame],
@@ -215,12 +277,19 @@ def run_backtest(
     lookahead: bool = False,
     spy_frame: pd.DataFrame | None = None,
     spy_note: str = "",
+    groups: dict[str, dict[str, str]] | None = None,
 ) -> BacktestResult:
     """Corre el backtest sobre las series ya validadas de cada símbolo.
 
     ``spy_frame`` es la serie de SPY para el benchmark de mercado. Si no se
     pasa, el informe lo dice en vez de omitir la columna en silencio; el motivo
     va en ``spy_note``.
+
+    ``groups`` son las etiquetas de ``config/universe.yaml`` (``{símbolo:
+    {sector: ..., tema: ...}}``), que es lo que ``risk.max_per_group`` necesita
+    para saber qué símbolos son el mismo cajón. Si la estrategia pide agrupar y
+    falta una etiqueta, el motor falla al arrancar en vez de aplicar el límite a
+    medias.
     """
     if not frames:
         raise ValueError("no hay datos para ningún símbolo del universo")
@@ -255,17 +324,29 @@ def run_backtest(
     portfolio = Portfolio(initial_cash=config.backtest.initial_cash, costs=costs)
 
     sizing = config.risk.position_sizing
+    trailing = config.exits.trailing_stop
+    trailing_on = trailing is not None and trailing.enabled
     take_profit = config.exits.take_profit
     target_ratio = (
         take_profit.ratio if take_profit is not None and take_profit.enabled else None
     )
     hard_stop = config.exits.hard_stop
 
+    guardia = portfolio_risk.guardia_desde_config(config, groups)
+    if guardia is not None and guardia.max_per_group:
+        # se valida ANTES del primer trade: un límite por grupo que no sabe a qué
+        # grupo pertenece un símbolo no es un límite, y descubrirlo en la barra
+        # 800 sería descubrirlo tarde
+        for symbol in sorted(series):
+            for etiqueta in guardia.max_per_group:
+                portfolio_risk.cupo_de_grupo(symbol, etiqueta, guardia.grupos)
+
     pending: dict[str, PendingOrder] = {}
     last_close: dict[str, float] = {}
     entry_bar: dict[str, int] = {}
     opened_today: set[str] = set()
     exposure: list[int] = []
+    heat_values: list[float] = []
     sizing_counts: dict[str, int] = {"riesgo": 0, "tope": 0, "cash": 0}
 
     for when in index:
@@ -337,12 +418,38 @@ def run_backtest(
                 continue
             last_close[symbol] = float(data.close[i])
             if symbol in portfolio.positions:
-                portfolio.positions[symbol].bars_held = i - entry_bar[symbol]
+                position = portfolio.positions[symbol]
+                position.bars_held = i - entry_bar[symbol]
+                if trailing_on:
+                    _mover_trailing(position, trailing, float(data.atr_trailing[i]))
 
         equity_now = portfolio.equity(last_close)
         sizing_equity = (
             equity_now if sizing.on == "current_equity" else config.backtest.initial_cash
         )
+
+        # Los cortacircuitos se evalúan ACÁ y no después de la marca, aunque la
+        # equity sea la misma: si se evaluaran después, el freno recién regiría
+        # para las señales de MAÑANA y esta noche saldría igual una orden más.
+        # "Cuando el mes va -6% se deja de abrir" se lee como "no sale la orden de
+        # esta noche", no "sale una y después paramos".
+        if guardia is not None and guardia.marcar(when, equity_now):
+            # el pico invalidó el sistema: se cierra todo. La venta va en la
+            # apertura de t+1, igual que cualquier otra salida por regla — no hay
+            # forma de vender al cierre de hoy con una orden decidida al cierre de
+            # hoy. Pisa cualquier orden pendiente del símbolo: el cierre manda.
+            for symbol in sorted(portfolio.positions):
+                data = series[symbol]
+                i = data.position_of.get(when)
+                proxima = data.next_date(i) if i is not None else None
+                if proxima is None:
+                    continue
+                pending[symbol] = PendingOrder(
+                    symbol=symbol,
+                    side="sell",
+                    execute_on=proxima,
+                    reasons=[portfolio_risk.RAZON_CIERRE_POR_PICO],
+                )
 
         for symbol in sorted(series):  # orden determinístico
             data = series[symbol]
@@ -364,6 +471,12 @@ def run_backtest(
             if not data.entry[i] or symbol in pending or next_date is None:
                 continue
 
+            if guardia is not None and guardia.frenado:
+                portfolio.rejections.append(
+                    Rejection(when.date(), symbol, guardia.rechazo_por_freno())
+                )
+                continue
+
             committed = len(portfolio.positions) + sum(
                 1 for o in pending.values() if o.side == "buy"
             ) - sum(1 for o in pending.values() if o.side == "sell")
@@ -372,6 +485,28 @@ def run_backtest(
                     Rejection(when.date(), symbol, "max_open_positions alcanzado")
                 )
                 continue
+
+            # Comprometido = posición abierta o compra ya mandada. Se saca lo que
+            # tiene una venta pendiente: ese lugar (y ese riesgo) se libera mañana
+            # en la misma apertura en la que entraría esta señal.
+            saliendo = {s for s, o in pending.items() if o.side == "sell"}
+            comprometidos = [
+                portfolio_risk.Comprometido(sym, portfolio_risk.riesgo_de(pos))
+                for sym, pos in portfolio.positions.items()
+                if sym not in saliendo
+            ] + [
+                portfolio_risk.Comprometido(o.symbol, o.risk_amount)
+                for o in pending.values()
+                if o.side == "buy"
+            ]
+
+            if guardia is not None:
+                motivo = guardia.rechazo_por_grupo(
+                    symbol, [c.symbol for c in comprometidos]
+                )
+                if motivo is not None:
+                    portfolio.rejections.append(Rejection(when.date(), symbol, motivo))
+                    continue
 
             price = float(data.close[i])
             risk_per_share = exit_rules.stop_distance(
@@ -393,6 +528,16 @@ def run_backtest(
                 portfolio.rejections.append(Rejection(when.date(), symbol, result.reason))
                 continue
 
+            # el heat va acá y no antes porque necesita el riesgo en pesos de ESTA
+            # señal, y ese número sale del sizing: acciones × riesgo por acción
+            if guardia is not None:
+                motivo = guardia.rechazo_por_heat(
+                    result.shares * result.risk_per_share, comprometidos, equity_now
+                )
+                if motivo is not None:
+                    portfolio.rejections.append(Rejection(when.date(), symbol, motivo))
+                    continue
+
             # quién decidió el tamaño: si no fue el riesgo, risk_pct es decorativo
             sizing_counts[
                 "tope" if "max_position_pct" in result.reason
@@ -410,8 +555,11 @@ def run_backtest(
             )
 
         # --- 4. mark-to-market al cierre de t -------------------------------
-        portfolio.mark(when, last_close)
+        equity_cierre = portfolio.mark(when, last_close)
         exposure.append(len(portfolio.positions))
+        heat_values.append(
+            portfolio_risk.heat_fraccion(portfolio.positions.values(), equity_cierre)
+        )
 
     # cierre forzado de lo que quede abierto, al último cierre disponible
     for symbol in sorted(portfolio.positions):
@@ -430,6 +578,7 @@ def run_backtest(
 
     equity = portfolio.equity_curve()
     exposure_series = pd.Series(exposure, index=index, name="exposure")
+    heat_series = pd.Series(heat_values, index=index, name="portfolio_heat")
     bench_start = index[min(config.warmup_bars, len(index) - 1)]
     benchmark = buy_and_hold(
         sliced,
@@ -482,6 +631,7 @@ def run_backtest(
         trades=portfolio.trades,
         rejections=portfolio.rejections,
         exposure=exposure_series,
+        portfolio_heat=heat_series,
         metrics=metrics,
         benchmark_metrics=compute_metrics(benchmark),
         symbols=sorted(sliced),

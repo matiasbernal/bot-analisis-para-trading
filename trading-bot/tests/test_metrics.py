@@ -506,6 +506,8 @@ def test_la_racha_se_reporta_como_observacion_unica():
     """Con pocos trades, la peor racha es un dato, no una estadística."""
     from types import SimpleNamespace
 
+    from conftest import make_strategy
+
     from tradingbot.reporting.report import warnings_for
 
     equity = pd.Series(
@@ -518,7 +520,9 @@ def test_la_racha_se_reporta_como_observacion_unica():
         metrics=compute_metrics(equity, pocos),
         benchmark_metrics={"cagr": 0.0},
         rule_trades=pocos,
-        config=None,
+        # config real y no None: `warnings_for` mira `exits.trailing_stop` para
+        # decidir si tiene que avisar que el trailing entra por diseño
+        config=make_strategy(),
     )
     textos = " ".join(w["text"] for w in warnings_for(resultado))
     assert "UNA observación" in textos

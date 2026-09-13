@@ -1,16 +1,22 @@
-# Cruce de medias con filtro de tendencia.
-# Línea base del PLAN: hard stop + trailing chandelier, más el objetivo.
-# El trailing está prendido POR DISEÑO ("las plantillas arrancan con dos capas
-# prendidas"), no porque se haya medido que aporta: no compite en el torneo de la
-# tanda 2C, es lo que el resto tiene que superar. El informe lo aclara donde
-# aparece. El break-even, la reversión, el giveback, el time stop y el régimen son
-# del torneo; config.py los rechaza con un mensaje explícito si se agregan ahora.
+# ema_cross.yaml con el trailing APAGADO. No es otra estrategia ni una plantilla
+# para operar: es el par de comparación de la de al lado.
 #
-# La misma plantilla con el trailing apagado está en ema_cross_sin_trailing.yaml:
-# es la corrida base del banco A/B (`tradingbot comparar`) y la que usan las
-# mediciones de sizing, que son del lado de la entrada y no tienen por qué
-# depender de una capa de salida.
-name: ema_cross_trend_filter
+# Existe por dos motivos concretos:
+#
+#   1. El banco A/B (`tradingbot comparar -b ema_cross_sin_trailing.yaml
+#      -v ema_cross.yaml`) necesita las dos corridas sobre los mismos datos para
+#      emparejar trade contra trade. Sin este archivo, "el trailing mejora la
+#      expectancy" no se puede ni plantear como medición.
+#   2. Las mediciones de riesgo realizado y de quién decide el tamaño
+#      (`scripts/riesgo_realizado.py`) son del lado de la ENTRADA. Con una capa de
+#      salida prendida, el tamaño de las posiciones pasa a depender de cuándo
+#      salieron las anteriores (equity y cash), y el número deja de medir lo que
+#      dice medir.
+#
+# Los dos archivos tienen que ser idénticos salvo el bloque trailing_stop, el
+# nombre y la calibración: hay un test que lo verifica
+# (test_trailing_chandelier.py).
+name: ema_cross_trend_filter_sin_trailing
 universe: [AAPL, MSFT, SPY, QQQ]
 interval: 1d
 warmup_bars: 200              # barras descartadas hasta que los indicadores son válidos
@@ -33,25 +39,15 @@ exits:
     any:
       - {left: ema_fast, op: crosses_below, right: ema_slow}
   hard_stop:   {mode: atr, multiple: 2.0, atr_period: 14}
-  # 3 x ATR desde el MÁXIMO alcanzado, sin activarse hasta que el trade avanzó 1R.
-  # El nivel se recalcula al cierre de cada vela y rige desde la siguiente.
-  trailing_stop:
-    mode:             chandelier
-    multiple:         3.0
-    atr_period:       14
-    activate_after_r: 1.0
   take_profit: {mode: rr,  ratio: 3.0}
 
 calibration:
   version: 3
   date: 2026-09-13
   changed: >-
-    Entra el trailing chandelier (3 x ATR desde el máximo, armado en +1R) como
-    LÍNEA BASE por decisión de diseño del PLAN, no como capa medida: con este
-    universo y este período el poder no alcanza para afirmar que aporta, y sobre
-    series sintéticas no alcanzaría ni con más trades. Cambian todas las métricas
-    de salida respecto de la v2; las de entrada (sizing, 1R realizado) no, y por
-    eso se siguen midiendo sobre ema_cross_sin_trailing.yaml.
+    Par de comparación de ema_cross.yaml v3, con el trailing apagado. Comparte
+    calibración de entrada con ella (max_position_pct 30, risk_pct 1.0), que es
+    lo que hace que el banco A/B mida la capa y no dos estrategias distintas.
 
 execution:
   signal_on:      close          # la regla se evalúa con la vela CERRADA

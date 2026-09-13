@@ -21,7 +21,14 @@ from pathlib import Path
 import yaml
 
 from tradingbot.backtest.engine import run_backtest
-from tradingbot.backtest.poder import poder_lineas, sigma_a_priori, trades_necesarios
+from tradingbot.backtest.poder import (
+    N_UNIVERSO_REAL,
+    poder_lineas,
+    poder_por_capa,
+    proyectar,
+    sigma_a_priori,
+    trades_necesarios,
+)
 from tradingbot.config import StrategyConfig
 from tradingbot.data.local import LocalCsvProvider
 
@@ -62,6 +69,13 @@ def corrida(plantilla: Path, datos: Path, simbolos: list[str] | None = None):
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--strategy", type=Path, default=PLANTILLA)
+    parser.add_argument(
+        "--proyectar",
+        type=int,
+        default=N_UNIVERSO_REAL,
+        help="Tamaño de universo al que proyectar el MDE (0 lo desactiva). "
+        f"Por defecto {N_UNIVERSO_REAL}, los trades esperables con datos reales.",
+    )
     args = parser.parse_args(argv)
 
     for nombre, (datos, simbolos) in UNIVERSOS.items():
@@ -77,6 +91,23 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(poder_lineas(trades, spy=resultado.spy_data)))
 
         sigma = sigma_a_priori(trades)
+
+        if args.proyectar:
+            filas = poder_por_capa(trades, spy=resultado.spy_data, sigma=sigma)
+            print("")
+            print(
+                f"  PROYECCIÓN a n = {args.proyectar} trades (15 años x 10 símbolos): "
+                "misma f, mismo σ,"
+            )
+            print("  mismo efecto disponible; lo único que cambia es el MDE, que va con 1/√(f·n)")
+            print("  capa             afect    f     MDE/afect  disponible  veredicto")
+            for fila in proyectar(filas, args.proyectar):
+                print(
+                    f"  {fila.capa:<15} {fila.n_afectados:>4}  {fila.fraccion:5.2f}  "
+                    f"{fila.mde_afectado:8.2f}R  {fila.efecto_disponible:8.2f}R  "
+                    f"{fila.veredicto}"
+                )
+
         print("")
         print("  cuántos trades harían falta (con σ de este universo):")
         for objetivo in OBJETIVOS:

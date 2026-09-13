@@ -30,6 +30,8 @@ from tradingbot.backtest.poder import (
     sigma_a_priori,
 )
 from tradingbot.backtest.validation import in_out_metrics
+from tradingbot.strategy import portfolio_risk
+from tradingbot.strategy.exits import REASON_TRAILING as TRAILING_REASON
 from tradingbot.reporting import charts as charts_mod
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -127,10 +129,155 @@ def exit_breakdown(trades_frame: pd.DataFrame) -> list[dict[str, Any]]:
     return rows
 
 
+#: lo que hay que decir cada vez que el trailing aparece en un informe. Es el
+#: mismo tipo de aviso que el de rango recortado: un dato del que se sacan
+#: conclusiones equivocadas si no está al lado del número.
+TRAILING_NO_VALIDADO = (
+    "El trailing chandelier está PRENDIDO POR DISEÑO, no por medición: el PLAN "
+    "lo declara línea base de las plantillas (hard stop + trailing) y por eso no "
+    "compite en el torneo de capas. Con este universo y este período el poder de "
+    "medición NO alcanza para afirmar que aporta, así que nada de lo que dice "
+    "este informe sobre el trailing es evidencia de que convenga tenerlo prendido."
+)
+
+
+def trailing_enabled(result: BacktestResult) -> bool:
+    trailing = result.config.exits.trailing_stop
+    return trailing is not None and trailing.enabled
+
+
+#: cómo se agrupan los motivos de rechazo en la tabla del informe:
+#: (categoría, qué la produce, predicado sobre el texto del motivo). El orden es
+#: el de la tabla, y el último cajón junta lo que no encaje en ninguno para que
+#: la suma cierre siempre contra el total de rechazos.
+_CATEGORIAS_RECHAZO: list[tuple[str, str, Any]] = [
+    (
+        "heat de cartera",
+        "el riesgo abierto más el de la señal pasaba max_portfolio_heat_r",
+        lambda m: m.startswith(portfolio_risk.MOTIVO_HEAT),
+    ),
+    (
+        "límite por grupo",
+        "ya había max_per_group posiciones del mismo grupo",
+        lambda m: m.startswith(portfolio_risk.MOTIVO_GRUPO),
+    ),
+    (
+        "cortacircuito",
+        "el mes o el drawdown desde el pico frenaron las entradas",
+        lambda m: m.startswith(portfolio_risk.MOTIVO_CB_MES)
+        or m.startswith(portfolio_risk.MOTIVO_CB_PICO),
+    ),
+    (
+        "lugares ocupados",
+        "max_open_positions alcanzado",
+        lambda m: "max_open_positions" in m,
+    ),
+    (
+        "cash",
+        "no alcanzaba la plata para comprar ni una acción",
+        lambda m: "cash" in m,
+    ),
+    (
+        "tope de concentración",
+        "max_position_pct no daba ni para una acción",
+        lambda m: "tope de concentración" in m,
+    ),
+    (
+        "datos o sizing",
+        "ATR sin valor, precio inválido, o el riesgo por acción pasaba el riesgo por trade",
+        lambda m: True,
+    ),
+]
+
+
+def rejection_table(result: BacktestResult) -> list[dict[str, Any]]:
+    """Cuántas señales se descartaron y por qué, agrupadas por categoría.
+
+    El PLAN pide que el backtest refleje "las señales que **realmente** habrías
+    podido tomar, no todas las que aparecieron". Un backtest que descarta señales
+    en silencio miente en la dirección optimista dos veces: no muestra las que el
+    riesgo de cartera frenó, y hace parecer que el sistema opera más de lo que
+    puede.
+
+    La suma de la columna cierra contra el total de rechazos por construcción: la
+    última categoría se queda con todo lo que no clasificó antes.
+    """
+    if not result.rejections:
+        return []
+    conteos: dict[str, int] = defaultdict(int)
+    for rejection in result.rejections:
+        for categoria, _, predicado in _CATEGORIAS_RECHAZO:
+            if predicado(rejection.reason):
+                conteos[categoria] += 1
+                break
+
+    total = len(result.rejections)
+    filas = []
+    for categoria, explicacion, _ in _CATEGORIAS_RECHAZO:
+        if not conteos[categoria]:
+            continue
+        filas.append(
+            {
+                "categoria": categoria,
+                "count": conteos[categoria],
+                "pct": f"{conteos[categoria] / total * 100:.0f}%",
+                "explicacion": explicacion,
+            }
+        )
+    return filas
+
+
+def heat_lines(result: BacktestResult) -> list[str]:
+    """El heat de cartera a lo largo de la corrida, en % del equity.
+
+    Va al informe porque el tope es un número del YAML y esto es lo que pasó de
+    verdad: un heat máximo muy por debajo del tope quiere decir que el control
+    nunca ató y que los rechazos por heat, si los hay, vienen de otro lado.
+    """
+    serie = result.portfolio_heat
+    if serie is None or serie.empty:
+        return []
+    tope = result.config.risk.max_portfolio_heat_r
+    lines = [
+        "",
+        "Heat de cartera (Σ riesgo real abierto / equity)",
+        "-" * 58,
+        f"  {'máximo':<28}{serie.max() * 100:>8.2f}%",
+        f"  {'medio (días con posición)':<28}"
+        f"{(serie[serie > 0].mean() if (serie > 0).any() else 0.0) * 100:>8.2f}%",
+        f"  {'días con heat > 0':<28}{int((serie > 0).sum()):>8}",
+    ]
+    if tope is not None:
+        lines.append(f"  {'tope (max_portfolio_heat_r)':<28}{tope:>8.2f}%")
+        exceso = serie.max() * 100 - tope
+        if exceso > 1e-9:
+            lines.append(
+                f"  El máximo quedó {exceso:.2f} puntos por encima del tope, y no es un bug:"
+            )
+            lines.append(
+                "  el control es EX ANTE (se aplica cuando llega la señal, contra la equity"
+            )
+            lines.append(
+                "  de ese cierre). Si después la equity cae, el mismo riesgo abierto pesa más"
+            )
+            lines.append(
+                "  sobre un equity más chico. Bajarlo pediría recortar posiciones ya abiertas,"
+            )
+            lines.append(
+                "  que es otra decisión y no está en el plan."
+            )
+    else:
+        lines.append("  tope                        sin definir (max_portfolio_heat_r apagado)")
+    return lines
+
+
 def warnings_for(result: BacktestResult) -> list[dict[str, Any]]:
     """Lo que un informe honesto dice aunque duela."""
     out: list[dict[str, Any]] = []
     n = int(result.metrics["n_trades"])
+
+    if trailing_enabled(result):
+        out.append({"strong": False, "text": TRAILING_NO_VALIDADO})
     if n < 30:
         out.append(
             {
@@ -301,15 +448,25 @@ def risk_unit_lines(result: BacktestResult) -> list[str]:
 
     ingenua = expectancy * declarado
     if declarado and abs(ingenua - en_plata) > 0.01 * max(abs(en_plata), 1.0):
-        error = abs(ingenua / en_plata - 1) * 100 if en_plata else float("inf")
         lines.append(
             f"  OJO: leer la expectancy como '{expectancy:+.2f}R × ${declarado:,.2f}' da "
             f"${ingenua:+,.2f} por trade,"
         )
-        lines.append(
-            f"       y el promedio real es ${en_plata:+,.2f}. Esa lectura se equivoca "
-            f"{error:.0f}%."
-        )
+        # Con la expectancy en plata cerca de cero, el error relativo se dispara
+        # (426%, 1.900%...) y deja de significar nada: el denominador es ruido. Ahí
+        # el número honesto es la diferencia en pesos, no el porcentaje.
+        piso = 0.05 * real if real else 1.0
+        if abs(en_plata) < piso:
+            lines.append(
+                f"       y el promedio real es ${en_plata:+,.2f}. La diferencia es de "
+                f"${ingenua - en_plata:+,.2f} por trade; el error en % no se publica "
+                f"porque con la expectancy tan cerca de cero es un cociente sobre ruido."
+            )
+        else:
+            lines.append(
+                f"       y el promedio real es ${en_plata:+,.2f}. Esa lectura se equivoca "
+                f"{abs(ingenua / en_plata - 1) * 100:.0f}%."
+            )
     return lines
 
 
@@ -478,8 +635,25 @@ def render_console(result: BacktestResult, manifest: dict | None = None) -> str:
                 f"{row['reason']:<20}{row['count']:>8}{row['pct']:>6}"
                 f"{row['avg_pnl']:>14}{row['avg_r']:>10}"
             )
+        if any(row["reason"].endswith(TRAILING_REASON) for row in breakdown):
+            add("")
+            add(
+                "  trailing_stop / gap_trailing_stop: la salida la decidió el trailing, que"
+            )
+            add(
+                "  está prendido POR DISEÑO y no porque se haya medido que aporta. Un R medio"
+            )
+            add(
+                "  lindo en esta fila no es evidencia a favor de la capa: para eso hace falta"
+            )
+            add(
+                "  el banco A/B contra la misma corrida sin trailing, y el poder para leerlo."
+            )
 
     for line in risk_unit_lines(result):
+        add(line)
+
+    for line in heat_lines(result):
         add(line)
 
     add("")
@@ -514,11 +688,23 @@ def render_console(result: BacktestResult, manifest: dict | None = None) -> str:
     if result.rejections:
         add("")
         add(f"Señales rechazadas: {len(result.rejections)}")
+        add("(el backtest refleja las señales que realmente se habrían podido tomar)")
+        add("-" * 58)
+        add(f"{'Categoría':<24}{'Señales':>9}{'%':>6}   Qué la produjo")
+        for fila in rejection_table(result):
+            add(
+                f"{fila['categoria']:<24}{fila['count']:>9}{fila['pct']:>6}   "
+                f"{fila['explicacion']}"
+            )
+        add("")
+        add("  detalle por motivo:")
         counts: dict[str, int] = defaultdict(int)
         for rejection in result.rejections:
             counts[rejection.reason] += 1
-        for reason, count in sorted(counts.items(), key=lambda kv: -kv[1]):
+        for reason, count in sorted(counts.items(), key=lambda kv: -kv[1])[:12]:
             add(f"  {count:>4}  {reason}")
+        if len(counts) > 12:
+            add(f"        ... y {len(counts) - 12} motivos más (cada uno con su cuenta)")
 
     if manifest:
         add("")
@@ -640,6 +826,8 @@ def render_html(
             {"date": r.date.strftime("%Y-%m-%d"), "symbol": r.symbol, "reason": r.reason}
             for r in result.rejections[:200]
         ],
+        rejection_table=rejection_table(result),
+        heat=heat_lines(result)[3:],
         costs_total=(
             f"${result.metrics['total_commission'] + result.metrics['total_slippage']:,.2f}"
         ),

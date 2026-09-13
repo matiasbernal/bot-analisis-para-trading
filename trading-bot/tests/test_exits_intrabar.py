@@ -1,12 +1,14 @@
 """Resolución intrabar de las salidas, con velas escritas a mano.
 
-En la tanda 1 hay dos capas: hard stop y take profit. Las reglas que se prueban
-acá son las que separan un backtest honesto de uno que asume que siempre te
-sacan al precio que querías:
+Las reglas que se prueban acá son las que separan un backtest honesto de uno que
+asume que siempre te sacan al precio que querías:
 
 * si la vela abre con gap por debajo del stop, el fill es en la **apertura**;
 * si en la misma vela se tocan stop y objetivo, **gana el stop**;
-* el hard stop no se mueve durante el trade (el trailing es de la tanda 2).
+* sin trailing configurado, el stop del trade es el inicial y no se mueve nunca.
+
+El trailing tiene sus propios tests en ``test_trailing_chandelier.py``: acá se
+verifica que **sin** la capa nada se mueva, que es la contraparte necesaria.
 """
 
 from __future__ import annotations
@@ -74,7 +76,7 @@ def test_objetivo_solo_sale_al_objetivo():
 
 
 def test_el_hard_stop_no_se_mueve_durante_el_trade():
-    """En la tanda 1 no hay trailing: el stop del trade es el inicial, siempre."""
+    """Sin `exits.trailing_stop` en el YAML, el stop del trade es el inicial, siempre."""
     bars = flat(WARMUP + 1) + [
         (100.0, 112.0, 99.5, 111.0),  # sube fuerte pero no llega al objetivo
         (111.0, 113.0, 94.0, 96.0),   # y después se da vuelta hasta el stop

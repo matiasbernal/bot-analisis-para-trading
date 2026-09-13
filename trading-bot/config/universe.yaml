@@ -1,5 +1,11 @@
 # Símbolos a vigilar. Las etiquetas (sector, tema) las usa el límite por grupo
-# de la tanda 2 (`risk.max_per_group`); en la tanda 1 se ignoran.
+# (`risk.max_per_group`), que las lee de acá y no del YAML de estrategia: son
+# propiedades del universo y no de la estrategia, así que dos estrategias sobre
+# los mismos papeles comparten sectores.
+#
+# Un símbolo del universo de una estrategia que pida `max_per_group` y no esté
+# etiquetado acá hace fallar el backtest al arrancar, en vez de caer en un cajón
+# "otros" que sería un grupo más con su propio cupo.
 #
 # Sesgo de supervivencia: las plantillas se validan primero sobre ETFs amplios.
 # Un ETF no quiebra ni se deslista, así que el sesgo casi desaparece. Un universo
@@ -10,3 +16,18 @@ symbols:
   - {symbol: QQQ,  sector: etf,        tema: tecnologia}
   - {symbol: AAPL, sector: technology, tema: hardware}
   - {symbol: MSFT, sector: technology, tema: software}
+
+  # Los seis de abajo completan el universo correlacionado
+  # (tests/fixtures/correlated/), que es el que sirve para probar riesgo de
+  # cartera: sobre las series independientes de la tanda 1 la volatilidad de la
+  # cartera es el 32% de la de sus componentes y cualquier control se vería mucho
+  # mejor de lo que es. Los sectores son los de verdad, no los del generador: el
+  # generador agrupa AAPL/MSFT/NVDA/QQQ juntos porque necesita un grupo de cuatro
+  # para que `max_per_group: 2` se pueda violar, y eso es una decisión del
+  # fixture, no una clasificación del mercado.
+  - {symbol: NVDA, sector: technology, tema: semiconductores}
+  - {symbol: XOM,  sector: energy,     tema: integradas}
+  - {symbol: CVX,  sector: energy,     tema: integradas}
+  - {symbol: COP,  sector: energy,     tema: exploracion}
+  - {symbol: JNJ,  sector: healthcare, tema: farma}
+  - {symbol: PG,   sector: staples,    tema: consumo_basico}

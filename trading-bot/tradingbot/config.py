@@ -6,10 +6,10 @@ indicadores, que cada operador exista, que cada operando se pueda resolver, y
 que las fechas y los porcentajes tengan sentido. Un KeyError a los diez minutos
 de backtest no es un mensaje de error.
 
-Lo que todavía no está implementado (tanda 2: trailing, break-even, reversión,
-giveback, time stop, régimen, earnings, riesgo de cartera) se rechaza con un
-mensaje que dice explícitamente que es de la tanda 2, en vez de ignorarse en
-silencio y hacer creer que el backtest lo tuvo en cuenta.
+Lo que todavía no está implementado (break-even, reversión, giveback, time
+stop, régimen, earnings) se rechaza con un mensaje que dice explícitamente que
+es del torneo de la tanda 2C, en vez de ignorarse en silencio y hacer creer que
+el backtest lo tuvo en cuenta.
 """
 
 from __future__ import annotations
@@ -42,9 +42,8 @@ class ConfigError(ValueError):
     """La configuración no es válida. El mensaje dice qué y dónde."""
 
 
-#: bloques previstos en el plan pero que son de la tanda 2 en adelante
+#: capas previstas en el plan que son del torneo de la tanda 2C y todavía no existen
 _TANDA_2 = {
-    "trailing_stop": "trailing stop (Fase 3)",
     "break_even": "break-even (Fase 3)",
     "reversal": "salida por reversión (Fase 3)",
     "giveback": "giveback (Fase 3)",
@@ -53,19 +52,13 @@ _TANDA_2 = {
     "event_risk": "riesgo de eventos / earnings (Fase 3)",
 }
 
-_RISK_TANDA_2 = {
-    "max_portfolio_heat_r": "heat de cartera (Fase 3)",
-    "max_per_group": "límite por grupo (Fase 3)",
-    "circuit_breaker": "cortacircuito por drawdown (Fase 3)",
-}
-
-
 def _reject_future(data: Mapping[str, Any], table: Mapping[str, str], where: str) -> None:
     for key, label in table.items():
         if key in data:
             raise ValueError(
-                f"{where}: '{key}' es {label}; no está implementado en la tanda 1. "
-                "Sacalo del YAML o esperá la tanda 2."
+                f"{where}: '{key}' es {label}; TODAVÍA NO ESTÁ IMPLEMENTADO. "
+                "Sacalo del YAML o esperá la tanda que lo trae: un backtest que "
+                "ignora media configuración en silencio miente."
             )
 
 
@@ -114,6 +107,35 @@ class PositionSizing(BaseModel):
         return data
 
 
+class CircuitBreaker(BaseModel):
+    """Los dos cortes que paran el sistema, con horizontes distintos a propósito.
+
+    ``monthly_drawdown_pct`` es la racha mala: se deja de abrir, las posiciones
+    abiertas siguen con sus salidas, y el mes que viene se arranca de cero. Es la
+    regla que un trader disciplinado se impone y el bot hace mecánica.
+
+    ``peak_drawdown_pct`` es otra cosa: no es una racha, es la sospecha de que el
+    método o el mercado cambiaron. Cierra todo y **no se reanuda solo** — el
+    backtest no vuelve a abrir en lo que queda del período, porque reanudar
+    automáticamente convertiría la invalidación del sistema en una pausa, que es
+    justo lo que no es.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    monthly_drawdown_pct: float | None = Field(None, gt=0, le=100)
+    peak_drawdown_pct: float | None = Field(None, gt=0, le=100)
+
+    @model_validator(mode="after")
+    def _algo_que_hacer(self) -> "CircuitBreaker":
+        if self.monthly_drawdown_pct is None and self.peak_drawdown_pct is None:
+            raise ValueError(
+                "circuit_breaker: hay que poner al menos uno de monthly_drawdown_pct "
+                "o peak_drawdown_pct; un bloque vacío no hace nada y hace creer que sí"
+            )
+        return self
+
+
 class RiskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -121,12 +143,28 @@ class RiskConfig(BaseModel):
     max_position_pct: float = Field(20.0, gt=0, le=100)
     max_open_positions: int = Field(5, ge=1)
 
-    @model_validator(mode="before")
+    #: tope de riesgo abierto, leído como **% del equity** y no como R nominales:
+    #: 4.0 es "4% del equity en riesgo abierto". El motivo está en README, "La
+    #: unidad de riesgo": contar cuatro posiciones de 1R daría 4R nominales que en
+    #: la práctica son ~3.1R, y el cortacircuito quedaría calibrado sobre una
+    #: unidad que no es la que dice.
+    max_portfolio_heat_r: float | None = Field(None, gt=0)
+    #: ``{etiqueta: máximo}``, p.ej. ``{sector: 2}``. Las etiquetas salen de
+    #: universe.yaml; si falta la etiqueta de algún símbolo, el motor falla en vez
+    #: de aplicar un límite a medias.
+    max_per_group: dict[str, int] | None = None
+    circuit_breaker: CircuitBreaker | None = None
+
+    @field_validator("max_per_group")
     @classmethod
-    def _reject_portfolio_risk(cls, data: Any) -> Any:
-        if isinstance(data, Mapping):
-            _reject_future(data, _RISK_TANDA_2, "risk")
-        return data
+    def _grupos_positivos(cls, value: dict[str, int] | None) -> dict[str, int] | None:
+        for etiqueta, tope in (value or {}).items():
+            if tope < 1:
+                raise ValueError(
+                    f"max_per_group.{etiqueta}: el tope es {tope}; con 0 no se podría "
+                    "abrir ninguna posición y eso no es un límite, es apagar el sistema"
+                )
+        return value
 
 
 class HardStop(BaseModel):
@@ -144,6 +182,42 @@ class HardStop(BaseModel):
         if self.mode == "pct" and self.pct is None:
             raise ValueError("hard_stop mode 'pct' necesita 'pct' (porcentaje de la entrada)")
         return self
+
+
+class TrailingStop(BaseModel):
+    """Chandelier: el stop sigue al máximo alcanzado, a ``multiple`` × ATR.
+
+    Entra en la tanda 2A **por decisión de diseño del PLAN** ("las plantillas
+    arrancan con dos capas prendidas: hard stop + trailing"), no porque se haya
+    medido que aporta. Es la línea base contra la que el torneo de la 2C mide al
+    resto, así que no compite en el torneo. El informe lo dice donde aparece.
+
+    ``activate_after_r`` es de una sola vía: una vez que el trade llegó a ese
+    umbral la capa queda armada aunque el precio vuelva. Si se desarmara al
+    retroceder, el trailing se desengancharía justo durante el retroceso, que es
+    cuando hace falta (ver la invariante 3 de ``position.py``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    mode: Literal["chandelier"] = "chandelier"
+    multiple: float = Field(3.0, gt=0)
+    atr_period: int = Field(14, ge=1)
+    #: no se activa hasta que el trade avanzó esta cantidad de R. 0 = desde la entrada.
+    activate_after_r: float = Field(1.0, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_future_modes(cls, data: Any) -> Any:
+        if isinstance(data, Mapping):
+            mode = data.get("mode")
+            if mode in {"pct", "structure", "psar"}:
+                raise ValueError(
+                    f"trailing_stop mode '{mode}' está previsto en el plan pero no "
+                    "implementado: la tanda 2A hace solo 'chandelier'"
+                )
+        return data
 
 
 class TakeProfit(BaseModel):
@@ -168,6 +242,7 @@ class ExitsConfig(BaseModel):
 
     signal: dict[str, Any] | None = None
     hard_stop: HardStop = Field(default_factory=HardStop)
+    trailing_stop: TrailingStop | None = None
     take_profit: TakeProfit | None = None
 
     @model_validator(mode="before")
@@ -419,6 +494,45 @@ def load_strategy(path: str | Path) -> StrategyConfig:
         raise ConfigError(f"{path}:\n{_format_errors(exc)}") from None
     object.__setattr__(config, "source_path", path)
     return config
+
+
+class UniverseEntry(BaseModel):
+    """Una fila de ``config/universe.yaml``: el símbolo y sus etiquetas."""
+
+    model_config = ConfigDict(extra="allow")
+
+    symbol: str
+
+    @field_validator("symbol")
+    @classmethod
+    def _upper(cls, value: str) -> str:
+        return str(value).strip().upper()
+
+
+def load_universe(path: str | Path) -> dict[str, dict[str, str]]:
+    """``{símbolo: {etiqueta: valor}}`` a partir de ``config/universe.yaml``.
+
+    Las etiquetas son libres (``sector``, ``tema``, y las que se agreguen): el
+    límite por grupo se aplica sobre la que nombre el YAML de estrategia, así que
+    acá no hay una lista cerrada. Lo que sí se normaliza es el símbolo, para que
+    ``spy`` y ``SPY`` no sean dos cosas.
+    """
+    data = load_yaml(path)
+    filas = data.get("symbols")
+    if not isinstance(filas, list) or not filas:
+        raise ConfigError(f"{path}: se esperaba una lista en 'symbols'")
+
+    universo: dict[str, dict[str, str]] = {}
+    for fila in filas:
+        if not isinstance(fila, Mapping):
+            raise ConfigError(f"{path}: cada símbolo va como mapeo, llegó {fila!r}")
+        try:
+            entry = UniverseEntry(**fila)
+        except ValidationError as exc:
+            raise ConfigError(f"{path}:\n{_format_errors(exc)}") from None
+        etiquetas = {k: str(v) for k, v in fila.items() if k != "symbol"}
+        universo[entry.symbol] = etiquetas
+    return universo
 
 
 def load_settings(path: str | Path | None) -> Settings:

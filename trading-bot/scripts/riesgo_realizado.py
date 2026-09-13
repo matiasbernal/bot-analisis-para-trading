@@ -6,8 +6,14 @@ llena en la apertura siguiente, así que el riesgo que termina teniendo cada
 trade no es exactamente el 1R que pide el YAML. Este script mide cuánto se
 desvía, para decidir con el número y no a ojo.
 
-    python scripts/riesgo_realizado.py --strategy config/strategies/ema_cross.yaml \
-                                       --data tests/fixtures/
+    python scripts/riesgo_realizado.py \
+        --strategy config/strategies/ema_cross_sin_trailing.yaml \
+        --data tests/fixtures/
+
+La plantilla por defecto es la que tiene el trailing APAGADO, y eso es a
+propósito: esto mide el lado de la entrada. Con una capa de salida prendida, el
+tamaño de cada posición pasa a depender de cuándo salieron las anteriores (por
+el cash y la equity), y el número deja de medir el sizing.
 
 Riesgo realizado = acciones × riesgo por acción (en pesos).
 Riesgo objetivo  = equity al cierre de la señal × risk_pct.

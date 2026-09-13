@@ -869,6 +869,77 @@ plantillas dice que arrancan con dos capas prendidas (hard stop + trailing), as�
 trailing no compite en el torneo, es lo que el resto tiene que superar. `event_risk` queda
 fuera de 2C por la red, con la decisión escrita arriba.
 
+#### Lo que el loteo todavía no decía: con datos reales el torneo decide dos capas, no seis
+
+*(Agregado al cerrar 2A+2B. No es una decisión, es el número puesto sobre la mesa.)*
+
+El cálculo de poder por capa se hizo sobre los fixtures, que dan 30 trades (4 símbolos,
+5 años) y 73 (10 símbolos, 5 años). La pregunta que faltaba contestar es qué pasa con el
+universo que la Fase 3 va a tener de verdad: **15 años × 10 símbolos ≈ 230 trades**, a la
+frecuencia de señal de la plantilla (~1.5 trades por símbolo-año, medida sobre los dos
+fixtures). El MDE va con 1/√(f·n), así que proyectar es aritmética: misma *f*, mismo σ,
+mismo efecto disponible, y solo cambia *n*.
+
+    python scripts/poder.py --proyectar 230
+
+| capa | exigencia a n=230, universo indep. | exigencia a n=230, universo correlacionado |
+|---|---|---|
+| `trailing_stop` (línea base, no compite) | 23% | 21% |
+| `time_stop` | **23%** | **27%** |
+| `market_regime` | 34% | 54% |
+| `giveback` | 42% | 32% |
+| `break_even` | **55%** | **67%** |
+| `reversal` | no estimable sin la capa escrita | ídem |
+| `event_risk` | no estimable sin red | ídem |
+
+"Exigencia" es `MDE por trade afectado / efecto disponible`: qué fracción del **mejor
+caso** —capturar toda la R que el trade dejó sobre la mesa— tiene que lograr la capa, en
+cada trade que toca, para que el resultado se distinga de un empate. El criterio para
+leerla no es el flag binario `medible` (que a n=230 se prende para todas): ese flag es
+condición necesaria y nada más. Ninguna capa real captura su mejor caso —un chandelier
+devuelve 3 ATR antes de sacarte, un break-even sale exactamente en cero cuando el trade
+habría vuelto—, así que **una exigencia por encima de ~1/3 no es una capa medible: es una
+capa a la que le vamos a pedir un milagro y vamos a leer el empate como "no aporta"**.
+
+Con ese corte, y contando las seis capas del torneo:
+
+- **Se deciden dos**: `time_stop` (21-27% en los dos universos) y `reversal`, que no se
+  puede proyectar sin escribirla pero no hay razón para esperarle una *f* chica —toca
+  cualquier trade que dure lo suficiente como para acumular dos señales.
+- **Quedan sin poder cuatro**: `break_even` (55-67%, el único que falla claramente en los
+  dos universos), `giveback` y `market_regime` (borde: 42/32% y 34/54%, y **los dos
+  universos se contradicen sobre cuál de los dos está peor**, que es exactamente lo que
+  hay que esperar cuando el número está en el borde), y `event_risk`, que no entra por la
+  red y ya tenía su decisión escrita.
+
+O sea: **aun con los datos descargados, el torneo va a poder decidir dos capas y va a
+tener que declarar cuatro "no medibles con este universo"**. Eso no es un fracaso del
+torneo, es el resultado del torneo, y el informe lo tiene que decir así.
+
+**Las dos salidas, planteadas y sin decidir:**
+
+1. **Aceptarlo.** Las cuatro capas no medibles caen por la primera regla de desempate —el
+   default es apagada, la carga de la prueba es de la capa— y quedan apagadas en las
+   plantillas **con el motivo escrito**: "no medible con este universo", que no es lo
+   mismo que "medida y descartada". El costo es que se apagan capas que quizá aportan; la
+   ventaja es que no se prende nada sobre evidencia que no existe, y que la decisión queda
+   reabierta el día que el universo crezca.
+2. **Ampliar el universo.** Más símbolos bajan el MDE con 1/√n, pero elegir hoy los
+   símbolos de los últimos 15 años **trae sesgo de supervivencia** —el que el PLAN ya
+   marca como el que no se arregla del todo—, y lo trae justo en la dirección peor: un
+   universo de sobrevivientes tiene menos rachas malas, que son los trades donde
+   `break_even` y `market_regime` tendrían algo que hacer. Ampliar con ETFs amplios (que
+   no quiebran ni se deslistan) es el camino limpio, pero hay pocos con 15 años y están
+   muy correlacionados entre sí, así que suman menos *n* efectivo del que aparentan.
+   Una variante honesta es ampliar el **período** en vez del universo: 25 años en vez de
+   15 sobre los mismos ETFs no agrega sesgo de selección, pero mete dos regímenes de
+   mercado distintos adentro del in-sample, que es un problema diferente y no menor.
+
+No se decide acá. Se decide cuando estén los CSV y el número real esté medido en vez de
+proyectado, porque la *f* y el σ de arriba salen de series sintéticas y ahí valen lo que
+dice la etiqueta de alcance de `ESTADO.md`, sección 2: sirven para dimensionar el
+problema, no para cerrarlo.
+
 **Fase 4 — Informes, scan, journal y web de solo lectura.** Informe HTML con equity curve,
 drawdown y gráfico de precio con marcas de entrada/salida y el motivo de cada salida. Comando
 `scan` que corre las reglas sobre las últimas velas. Alertas por Telegram + cron diario

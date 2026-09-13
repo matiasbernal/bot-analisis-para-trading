@@ -25,7 +25,7 @@ from tradingbot.backtest.ab import SEED as AB_SEED
 from tradingbot.backtest.engine import run_backtest
 from tradingbot.backtest.manifest import build_manifest, save_manifest
 from tradingbot.backtest.poder import poder_lineas
-from tradingbot.config import ConfigError, load_settings, load_strategy
+from tradingbot.config import ConfigError, load_settings, load_strategy, load_universe
 from tradingbot.data.cache import ParquetCache
 from tradingbot.data.local import LocalCsvProvider
 from tradingbot.data.validate import DataValidationError
@@ -57,6 +57,29 @@ def _provider(data_dir: Optional[Path], settings_path: Optional[Path]):
 
 
 SPY = "SPY"
+
+#: etiquetas por símbolo para ``risk.max_per_group``. Es un archivo aparte del YAML
+#: de estrategia porque las etiquetas son del universo, no de la estrategia: dos
+#: estrategias sobre los mismos papeles comparten sectores.
+UNIVERSE_YAML = Path("config/universe.yaml")
+
+
+def _grupos(path: Optional[Path], config) -> dict[str, dict[str, str]]:
+    """Las etiquetas del universo, o ``{}`` si no hacen falta.
+
+    Si la estrategia no pide ``max_per_group``, no se lee nada: un backtest sin
+    límite por grupo no tiene por qué fallar porque falte un archivo que no usa.
+    Si sí lo pide y el archivo no está, el error lo dice con la ruta.
+    """
+    if not config.risk.max_per_group:
+        return {}
+    path = path or UNIVERSE_YAML
+    if not path.is_file():
+        raise ConfigError(
+            f"risk.max_per_group necesita las etiquetas de {path}, que no existe. "
+            "Pasá --universe con la ruta correcta o sacá max_per_group del YAML."
+        )
+    return load_universe(path)
 
 
 def _source_label(provider, symbol: str) -> str:
@@ -130,6 +153,9 @@ def backtest(
         None, "--symbol", help="Restringe el universo a estos símbolos."
     ),
     settings: Optional[Path] = typer.Option(None, "--settings", help="config/settings.yaml"),
+    universe: Optional[Path] = typer.Option(
+        None, "--universe", help="YAML con las etiquetas por símbolo (config/universe.yaml)."
+    ),
     report: Optional[Path] = typer.Option(
         None, "--report", "-r", help="Ruta del informe HTML a escribir."
     ),
@@ -148,15 +174,22 @@ def backtest(
         typer.secho(f"Configuración inválida:\n{exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
 
-    universe = [s.upper() for s in symbol] if symbol else config.universe
+    simbolos = [s.upper() for s in symbol] if symbol else config.universe
+    try:
+        grupos = _grupos(universe, config)
+    except ConfigError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
     provider, cache = _provider(data, settings)
-    frames, load = _cargar(config, universe, provider, cache, offline)
+    frames, load = _cargar(config, simbolos, provider, cache, offline)
 
     # SPY se descarga siempre, esté o no en el universo: la regla de rigor 5
     # pide comparar contra el mercado, no solo contra el propio universo
     spy_frame, spy_note = _load_spy(frames, load, provider)
 
-    result = run_backtest(config, frames, spy_frame=spy_frame, spy_note=spy_note)
+    result = run_backtest(
+        config, frames, spy_frame=spy_frame, spy_note=spy_note, groups=grupos
+    )
     manifest = build_manifest(config, frames, result.metrics, providers=_providers(provider, frames))
     result.data_hash = manifest["data"]["hash"]
     result.manifest = manifest
@@ -178,6 +211,9 @@ def comparar(
         None, "--data", "-d", help="Directorio con CSV locales (fixtures)."
     ),
     settings: Optional[Path] = typer.Option(None, "--settings", help="config/settings.yaml"),
+    universe: Optional[Path] = typer.Option(
+        None, "--universe", help="YAML con las etiquetas por símbolo (config/universe.yaml)."
+    ),
     seed: int = typer.Option(AB_SEED, "--seed", help="Semilla del bootstrap."),
     replicas: int = typer.Option(AB_REPLICAS, "--replicas", help="Réplicas del bootstrap."),
     offline: bool = typer.Option(False, "--offline", help="No descargar: usar solo el cache."),
@@ -207,8 +243,15 @@ def comparar(
     provider, cache = _provider(data, settings)
     frames, _ = _cargar(config_base, config_base.universe, provider, cache, offline)
 
-    resultado_base = run_backtest(config_base, frames)
-    resultado_variante = run_backtest(config_variante, frames)
+    try:
+        grupos_base = _grupos(universe, config_base)
+        grupos_variante = _grupos(universe, config_variante)
+    except ConfigError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    resultado_base = run_backtest(config_base, frames, groups=grupos_base)
+    resultado_variante = run_backtest(config_variante, frames, groups=grupos_variante)
 
     comparacion = ab.comparar(
         resultado_base,
@@ -219,6 +262,22 @@ def comparar(
         replicas=replicas,
     )
     typer.echo("\n".join(comparacion.lineas()))
+
+    if _difieren_en_trailing(config_base, config_variante):
+        # El banco no sabe qué capa está comparando: aplica las dos reglas de
+        # desempate y, ante un empate, dice "queda APAGADA". Para el trailing esa
+        # frase se lee al revés de lo que corresponde, así que va la aclaración
+        # justo abajo del veredicto y no en un apéndice.
+        typer.echo("")
+        typer.secho(
+            "  OJO CON ESTE VEREDICTO: la capa que cambia entre las dos corridas es el\n"
+            "  trailing, y el trailing NO es candidata del torneo. El PLAN lo declara\n"
+            "  línea base de las plantillas (hard stop + trailing), así que un empate\n"
+            "  estadístico acá NO lo apaga: sigue prendido por diseño. Lo que este\n"
+            "  número sí dice es que con este universo y este período el poder no\n"
+            "  alcanza para afirmar que aporta, ni para afirmar que resta.",
+            fg=typer.colors.YELLOW,
+        )
     typer.echo("")
     # acá el σ no se estima: la variante existe, así que sale del propio pareo
     deltas = [d for d in comparacion.pareo.deltas_r if d != 0.0]
@@ -230,6 +289,16 @@ def comparar(
             )
         )
     )
+
+
+def _difieren_en_trailing(base, variante) -> bool:
+    """¿La única capa que cambia entre las dos corridas es el trailing?"""
+
+    def prendido(config) -> bool:
+        trailing = config.exits.trailing_stop
+        return trailing is not None and trailing.enabled
+
+    return prendido(base) != prendido(variante)
 
 
 def main() -> None:

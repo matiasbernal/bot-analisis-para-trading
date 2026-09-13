@@ -18,8 +18,8 @@ con sus invariantes probadas, y no replicado en cada capa.
 Las tres invariantes, que son las que los tests fijan:
 
 1. **El stop nunca baja.** Se mueve solo por ``raise_stop``, que devuelve si
-   efectivamente se movió. No hay asignación directa a ``stop_current`` desde
-   afuera.
+   efectivamente se movió y anota **qué capa** lo movió (``stop_source``). No hay
+   asignación directa a ``stop_current`` desde afuera.
 2. **La unidad de riesgo se fija en la entrada y no se toca.** ``risk_per_share``
    es 1R para siempre, aunque el stop se mueva: si el denominador cambiara a
    mitad del trade, los R de dos trades dejarían de ser comparables y la
@@ -64,6 +64,11 @@ class Position:
     armed: set[str] = field(default_factory=set)
     #: cuántas veces se movió el stop. 0 quiere decir que sigue en el stop inicial.
     stop_moves: int = 0
+    #: qué capa fijó el stop vigente. Con ``stop_moves == 0`` es el hard stop.
+    #: Es lo que la atribución usa para no llamar "hard_stop" a una salida por
+    #: trailing: sin esto, las dos capas se ven iguales en el informe y la
+    #: pregunta "¿qué regla me saca?" queda sin respuesta.
+    stop_source: str = "hard_stop"
 
     exit_reasons: list[str] = field(default_factory=list)
 
@@ -148,19 +153,26 @@ class Position:
         return (peak - self.r_multiple(price)) / peak
 
     # --- movimiento del stop ---------------------------------------------
-    def raise_stop(self, new_stop: float) -> bool:
+    def raise_stop(self, new_stop: float, *, source: str = "trailing_stop") -> bool:
         """Mueve el stop **solo a favor**. Devuelve si se movió.
 
         Es el único camino para tocar ``stop_current``: el trailing y el
         break-even proponen un nivel y acá se decide. Un trailing que baja el stop
         deja de ser un trailing y se convierte en un stop que se agranda cuando el
         trade va mal, que es el error más caro posible.
+
+        ``source`` queda registrado en ``stop_source`` **solo si el stop se movió**:
+        una capa que propone un nivel peor que el vigente no se lleva el crédito de
+        la salida. Cuando la 2C agregue el break-even, la última capa que ganó la
+        puja es la que va a figurar en la atribución, que es lo correcto: es la que
+        puso el stop donde estaba cuando saltó.
         """
         mejor = new_stop > self.stop_current if self.direction > 0 else new_stop < self.stop_current
         if not mejor:
             return False
         self.stop_current = float(new_stop)
         self.stop_moves += 1
+        self.stop_source = source
         return True
 
     # --- armado de capas --------------------------------------------------

@@ -9,7 +9,8 @@ lo único que no se puede reconstruir leyéndolo.
   con dos correcciones marcadas dentro del propio archivo (cómo se calcula el
   heat, y qué puede decir la alerta).
 - Cómo usar la herramienta está en [`README.md`](README.md).
-- Rama de trabajo: `claude/trading-analysis-bot-8ehd5h`.
+- Rama de trabajo: `claude/trading-bot-trailing-scope-uft7ul`
+  (continúa `claude/trading-analysis-bot-8ehd5h`).
 
 ---
 
@@ -46,7 +47,15 @@ resuelta el 2026-09-12 y **la decisión está escrita en `PLAN.md`**, en la secc
   corre primero, sus mediciones quedan obsoletas el día que entra el heat.
 - **2C**: el torneo, de a una, en orden de grados de libertad creciente, con una
   pasada final donde las capas descartadas se reevalúan contra la configuración
-  ganadora.
+  ganadora. **PARADO hasta que haya CSV reales**, por la razón de la sección 2:
+  sobre series sintéticas el torneo mediría el generador y no el mercado, y eso
+  no lo arregla generar más trades.
+
+**Estado al cerrar esta tanda (2A + 2B).** 2A completa: `position.py` con sus
+tres invariantes, el banco A/B, el poder por capa, y el trailing chandelier
+—que entra por diseño, no validado—. 2B completa: `portfolio_risk.py` con los
+cinco controles, el heat en pesos y los rechazos registrados con motivo. Lo que
+queda pendiente es 2C, y lo que le falta no es código.
 
 Las dos decisiones de fondo que conviene no re-discutir sin leer el fundamento:
 cada capa se decide con walk-forward **dentro del in-sample** y el out-of-sample
@@ -57,7 +66,53 @@ resultado.
 
 ---
 
-## 2. Por qué `max_position_pct` es 30 y no 20
+## 2. Los fixtures sintéticos: para qué sirven y para qué no
+
+Esta es la distinción más fácil de perder y la más cara: **hay dos usos posibles
+de un fixture y el repo solo soporta uno**. Está escrito acá porque en dos meses
+un `pytest` en verde sobre datos sintéticos se va a leer como validación de la
+estrategia, y no lo es.
+
+| | Verificar el MOTOR | Decidir si una capa APORTA |
+|---|---|---|
+| La pregunta | ¿el código hace lo que dice? | ¿esta regla gana plata? |
+| Ejemplos | el trailing nunca baja el stop · el gap llena en la apertura y no en el precio del stop · el heat rechaza la sexta señal · la atribución de salidas suma el total de trades · `max_per_group` deja una señal afuera | el trailing mejora la expectancy · `giveback` aporta sobre el trailing ya fijo · el filtro de régimen paga lo que cuesta |
+| ¿Sirven los sintéticos? | **Sí, y son mejores que datos reales**: la serie es determinística y las velas a mano no tienen ambigüedad | **No, y el resultado no es "débil" sino que no significa nada** |
+
+**Por qué el segundo uso no se arregla con más datos sintéticos.** No es un
+problema de muestra chica. Las capas de salida explotan estructura del precio —
+retrocesos, persistencia, cuánto dura un movimiento antes de darse vuelta— y en
+estas series esa estructura **la define el generador**: `_ohlcv_from_shocks` arma
+cada vela con shocks normales iid sobre el cierre, un gap independiente en la
+apertura y un rango intrabar sorteado aparte. Un random walk no tiene retrocesos
+con memoria, ni volatilidad agrupada, ni colas gordas. Un torneo corrido ahí no
+mediría el mercado: mediría `_ohlcv_from_shocks`. Con 300 trades sintéticos el
+intervalo de confianza se angosta alrededor del número equivocado, que es peor
+que un intervalo ancho, porque parece una respuesta.
+
+Ninguna de las dos propiedades que el generador **sí** reproduce a pedido cambia
+esto. La correlación entre símbolos (`correlated_universe`) es real y es lo que
+hace medibles los controles de cartera —el heat, `max_per_group`, los gaps
+simultáneos—, pero eso son **restricciones**, no candidatas de torneo: se cumplen
+o no, y eso se verifica. Y el drift positivo hace que un backtest dé coherente,
+que es un test de cordura del motor, no evidencia sobre una regla.
+
+**La consecuencia práctica**, para no tener que volver a razonarlo:
+
+- Un test que fija un número medido sobre sintéticos (una correlación, una
+  fracción, un umbral) es legítimo: fija el **comportamiento del código**, para
+  que se note si cambia.
+- Un test que dijera "con el trailing la expectancy sube 0.2R, así que el
+  trailing aporta" sería ilegítimo, aunque estuviera en verde. **No hay ninguno
+  y no tiene que haberlo.**
+- Por eso `trailing_stop` entra en 2A **por decisión de diseño del PLAN** (línea
+  base de las plantillas) y no como capa validada, y el informe lo dice donde
+  aparece el trailing.
+- Y por eso 2C —el torneo— **está parado hasta que haya CSV reales**, aunque el
+  banco A/B y el módulo de poder ya funcionen. El instrumento está listo; lo que
+  falta no es instrumento, es mercado.
+
+## 3. Por qué `max_position_pct` es 30 y no 20
 
 El tamaño de cada posición sale del menor de tres números: el que pide el riesgo,
 el que permite el tope de concentración y el que alcanza el cash. Igualando los
@@ -96,7 +151,7 @@ que si alguien rompe el aviso, se entera.
 
 ---
 
-## 3. El sesgo ATR: dormido, no resuelto
+## 4. El sesgo ATR: dormido, no resuelto
 
 El tope ata cuando el stop está cerca, y el stop está cerca cuando el ATR es
 bajo. O sea que **el motor arriesga menos en los trades tranquilos y 1R completo
@@ -122,7 +177,7 @@ reportar) lo elimina; lo que se hizo fue sacarlo del camino y dejarlo medido.
 
 ---
 
-## 4. La unidad de riesgo: `return_on_risk` y el heat
+## 5. La unidad de riesgo: `return_on_risk` y el heat
 
 **1R no vale lo que dice el YAML.** `risk_pct: 1.0` sobre $10.000 declara $100 por
 trade, pero el riesgo realizado es `acciones × riesgo por acción`, y eso es menos:
@@ -160,7 +215,7 @@ dice. Lo mismo vale para cualquier lectura tipo "cinco pérdidas seguidas son
 
 ---
 
-## 5. El formato de alerta decidido (Fase 4, sin implementar)
+## 6. El formato de alerta decidido (Fase 4, sin implementar)
 
 El plan define una alerta que imprime `Riesgo: 1.0R = $101`. Con la unidad real
 hay que reescribirlo, y hay un dato que cambia el diseño: **el riesgo en pesos sí
@@ -193,7 +248,7 @@ Las tres reglas, con su razón:
 
 ---
 
-## 6. El universo correlacionado y para qué está cada grupo
+## 7. El universo correlacionado y para qué está cada grupo
 
 Hay **dos** universos sintéticos y la diferencia importa:
 
@@ -240,7 +295,7 @@ matriz imposible falla con un mensaje que lo dice.
 
 ---
 
-## 7. Qué está deliberadamente afuera, y por qué
+## 8. Qué está deliberadamente afuera, y por qué
 
 **Redimensionar en el fill (la opción "B1").** Recalcular las acciones con
 `open[t+1]` ya conocido en vez de estimar con `close[t]`. Se evaluó con números y
@@ -281,7 +336,7 @@ dos tests que los usan se saltean.
 
 ---
 
-## 8. Qué números del informe cambiaron respecto de la tanda 1
+## 9. Qué números del informe cambiaron respecto de la tanda 1
 
 La plantilla `ema_cross` declara su calibración en el YAML y el informe la imprime
 en el encabezado, justamente para que dos informes de la misma estrategia no se
@@ -330,7 +385,7 @@ Dos cambios más del informe que no vienen del tope:
 
 ---
 
-## 9. Convenciones que conviene no romper
+## 10. Convenciones que conviene no romper
 
 - **Un commit por bloque de trabajo**, con el mensaje explicando la razón y no
   solo el qué. Los mensajes de este repo son parte de la documentación.

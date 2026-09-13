@@ -111,11 +111,10 @@ def test_rechaza_bollinger_sin_elegir_banda(tmp_path):
         load_strategy(path)
 
 
-# --- lo que es de la tanda 2 se rechaza diciendo que es de la tanda 2 ------
+# --- lo que es del torneo (2C) se rechaza diciendo que lo es -----------------
 @pytest.mark.parametrize(
     "bloque",
     [
-        {"trailing_stop": {"mode": "chandelier", "multiple": 3.0}},
         {"break_even": {"enabled": True, "trigger_r": 1.0}},
         {"reversal": {"mode": "count", "min_count": 2}},
         {"giveback": {"enabled": True}},
@@ -126,19 +125,83 @@ def test_rechaza_bollinger_sin_elegir_banda(tmp_path):
 )
 def test_rechaza_capas_de_salida_de_la_tanda_2(tmp_path, bloque):
     path = write(tmp_path, exits={**BASE["exits"], **bloque})
-    with pytest.raises(ConfigError, match="tanda 1"):
+    with pytest.raises(ConfigError, match="TODAVÍA NO ESTÁ IMPLEMENTADO"):
         load_strategy(path)
 
 
-def test_rechaza_riesgo_de_cartera_de_la_tanda_2(tmp_path):
-    path = write(tmp_path, risk={"max_portfolio_heat_r": 4.0})
-    with pytest.raises(ConfigError, match="tanda 1"):
+def test_el_trailing_ya_no_se_rechaza_pero_solo_en_chandelier(tmp_path):
+    """El trailing salió de la lista de la tanda 2 al implementarse en la 2A.
+
+    Los otros tres modos que el plan nombra (pct, structure, psar) siguen sin
+    existir, así que se rechazan con el mismo criterio de siempre: un backtest que
+    ignora media configuración miente.
+    """
+    path = write(
+        tmp_path,
+        exits={
+            **BASE["exits"],
+            "trailing_stop": {"mode": "chandelier", "multiple": 3.0, "activate_after_r": 1.0},
+        },
+    )
+    config = load_strategy(path)
+    assert config.exits.trailing_stop is not None
+    assert config.exits.trailing_stop.multiple == 3.0
+    assert config.exits.trailing_stop.activate_after_r == 1.0
+
+    for modo in ("pct", "structure", "psar"):
+        otro = write(
+            tmp_path,
+            exits={**BASE["exits"], "trailing_stop": {"mode": modo, "multiple": 3.0}},
+        )
+        with pytest.raises(ConfigError, match="no.*implementado"):
+            load_strategy(otro)
+
+
+def test_el_trailing_trae_los_defaults_del_plan(tmp_path):
+    """3 x ATR desde el máximo, armado en +1R: es lo que dice PLAN.md."""
+    path = write(tmp_path, exits={**BASE["exits"], "trailing_stop": {}})
+    trailing = load_strategy(path).exits.trailing_stop
+    assert (trailing.mode, trailing.multiple, trailing.activate_after_r) == (
+        "chandelier",
+        3.0,
+        1.0,
+    )
+
+
+def test_el_riesgo_de_cartera_ya_no_se_rechaza(tmp_path):
+    """Los cinco controles salieron de la lista de la tanda 2 al implementarse en 2B."""
+    path = write(
+        tmp_path,
+        risk={
+            **BASE["risk"],
+            "max_portfolio_heat_r": 4.0,
+            "max_per_group": {"sector": 2},
+            "circuit_breaker": {"monthly_drawdown_pct": 6.0, "peak_drawdown_pct": 15.0},
+        },
+    )
+    riesgo = load_strategy(path).risk
+    assert riesgo.max_portfolio_heat_r == 4.0
+    assert riesgo.max_per_group == {"sector": 2}
+    assert riesgo.circuit_breaker.monthly_drawdown_pct == 6.0
+    assert riesgo.circuit_breaker.peak_drawdown_pct == 15.0
+
+
+def test_un_cortacircuito_vacio_es_un_error(tmp_path):
+    """Un bloque sin ninguno de los dos topes no hace nada y hace creer que sí."""
+    path = write(tmp_path, risk={**BASE["risk"], "circuit_breaker": {}})
+    with pytest.raises(ConfigError, match="al menos uno"):
+        load_strategy(path)
+
+
+def test_un_tope_por_grupo_en_cero_es_un_error(tmp_path):
+    path = write(tmp_path, risk={**BASE["risk"], "max_per_group": {"sector": 0}})
+    with pytest.raises(ConfigError, match="no es un límite"):
         load_strategy(path)
 
 
 def test_rechaza_entry_filters_de_la_tanda_2(tmp_path):
     path = write(tmp_path, entry_filters={"min_price": 10})
-    with pytest.raises(ConfigError, match="tanda 1"):
+    with pytest.raises(ConfigError, match="TODAVÍA NO ESTÁ IMPLEMENTADO"):
         load_strategy(path)
 
 
@@ -259,6 +322,6 @@ def test_la_calibracion_va_al_manifiesto_y_al_informe(tmp_path):
     result = run_backtest(config, frames)
     manifest = build_manifest(config, frames, result.metrics)
 
-    assert manifest["strategy"]["calibration"]["version"] == 2
-    assert "max_position_pct" in manifest["strategy"]["calibration"]["changed"]
-    assert "Calibración   : v2" in render_console(result)
+    assert manifest["strategy"]["calibration"]["version"] == 3
+    assert "trailing" in manifest["strategy"]["calibration"]["changed"]
+    assert "Calibración   : v3" in render_console(result)

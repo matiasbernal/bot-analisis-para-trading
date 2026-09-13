@@ -18,6 +18,16 @@ vuelve a decidirlo ``risk_pct``.
 
 El gap **no** desvía el riesgo por acción: el stop se ancla al precio de fill
 real, así que la distancia entrada-stop es exactamente 1R siempre.
+
+**Por qué la plantilla es ``ema_cross_sin_trailing.yaml`` y no ``ema_cross.yaml``.**
+Todo lo que se mide acá es del lado de la ENTRADA: cuántas acciones se compran y
+cuánto riesgo real queda puesto. Con una capa de salida prendida ese número deja
+de depender solo del sizing: el trailing cierra posiciones antes, eso cambia el
+cash y la equity, y con otra equity el sizing de la señal siguiente da otra cosa.
+La distribución medida pasaría a ser "sizing + trailing" y no diría nada sobre el
+umbral ``risk_pct / max_position_pct``, que es lo que estos números sostienen.
+Las dos plantillas comparten toda la calibración de entrada y difieren solo en el
+trailing; ``test_trailing_chandelier.py`` verifica que no se separen.
 """
 
 from __future__ import annotations
@@ -31,7 +41,7 @@ import yaml
 from tradingbot.backtest.engine import run_backtest
 from tradingbot.config import StrategyConfig, load_strategy
 
-PLANTILLA = "config/strategies/ema_cross.yaml"
+PLANTILLA = "config/strategies/ema_cross_sin_trailing.yaml"
 
 
 def _medir(config, frames) -> pd.DataFrame:
@@ -235,3 +245,27 @@ def test_con_la_plantilla_actual_nada_de_eso_aparece(medicion):
     ingenua = result.metrics["expectancy_r"] * declarado
     error = abs(ingenua / result.metrics["expectancy_money"] - 1) * 100
     assert error < 10
+
+
+def test_con_la_expectancy_cerca_de_cero_no_se_publica_un_error_porcentual(
+    universe_frames_module,
+):
+    """Un cociente sobre ruido no es un número: se publica la diferencia en pesos.
+
+    Con el trailing prendido la expectancy en plata de este fixture queda en
+    $+0.67, y el error relativo de la lectura ingenua da 426%. Ese 426% no dice
+    nada —el denominador es ruido— y leerlo como "el informe se equivoca cuatro
+    veces" sería exactamente al revés de lo que el bloque quiere evitar.
+    """
+    from tradingbot.reporting.report import risk_unit_lines
+
+    config = load_strategy("config/strategies/ema_cross.yaml")  # v3, con trailing
+    result = run_backtest(config, universe_frames_module)
+    texto = "\n".join(risk_unit_lines(result))
+
+    assert abs(result.metrics["expectancy_money"]) < 5.0, (
+        "la expectancy en plata dejó de estar cerca de cero: el test perdió su caso"
+    )
+    assert "La diferencia es de $" in texto
+    assert "cociente sobre ruido" in texto
+    assert "se equivoca" not in texto

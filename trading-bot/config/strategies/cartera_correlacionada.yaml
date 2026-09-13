@@ -1,0 +1,80 @@
+# Las mismas reglas de entrada y salida que ema_cross, sobre los diez símbolos
+# del universo correlacionado y con los CINCO controles de riesgo de cartera
+# prendidos. Existe para una cosa concreta: que la tabla de rechazos del informe
+# tenga algo que mostrar.
+#
+# Por qué acá y no en ema_cross.yaml: el universo de ema_cross son cuatro
+# símbolos en dos sectores de a dos, y con dos por grupo `max_per_group: 2` no se
+# puede violar nunca. El control quedaría en el YAML sin ejercitarse jamás, que es
+# la peor forma de tener un control.
+#
+# Y por qué el universo correlacionado y no el de la tanda 1: sobre series
+# independientes la volatilidad de la cartera es el 32% de la de sus componentes
+# (pura diversificación de ruido) contra 78% acá, y el drawdown de la cartera es
+# 2.2x. Todo control de riesgo de cartera probado sobre las independientes se
+# vería mucho mejor de lo que es.
+#
+#     tradingbot backtest -s config/strategies/cartera_correlacionada.yaml \
+#         -d tests/fixtures/correlated
+#
+# ATENCIÓN: las series de tests/fixtures/correlated/ son random walks
+# determinísticos con los nombres puestos, no datos de mercado. Sirven para
+# verificar que los controles hacen lo que dicen; no para sacar ninguna
+# conclusión sobre esta estrategia (ESTADO.md, sección 2).
+name: cartera_correlacionada
+universe: [AAPL, MSFT, NVDA, QQQ, SPY, XOM, CVX, COP, JNJ, PG]
+interval: 1d
+warmup_bars: 200
+
+indicators:
+  ema_fast:  {type: ema,  source: close, period: 20}
+  ema_slow:  {type: ema,  source: close, period: 50}
+  atr:       {type: atr,  period: 14}
+
+entry:
+  all:
+    - {left: ema_fast, op: crosses_above, right: ema_slow}
+
+exits:
+  signal:
+    any:
+      - {left: ema_fast, op: crosses_below, right: ema_slow}
+  hard_stop:   {mode: atr, multiple: 2.0, atr_period: 14}
+  trailing_stop:
+    mode:             chandelier
+    multiple:         3.0
+    atr_period:       14
+    activate_after_r: 1.0
+  take_profit: {mode: rr,  ratio: 3.0}
+
+calibration:
+  version: 1
+  date: 2026-09-13
+
+execution:
+  signal_on:      close
+  fill_on:        next_open
+  commission_pct: 0.05
+  slippage_pct:   0.05
+
+risk:
+  position_sizing:    {mode: risk_pct, risk_pct: 1.0, on: current_equity}
+  max_position_pct:   30
+  # Alto a propósito: se quiere que aten el heat y el grupo, no el contador de
+  # lugares. Con max_open_positions en 5 los otros dos controles casi no se verían.
+  max_open_positions: 10
+
+  # Los cinco controles. El heat va en PESOS: 4.0 se lee como "4% del equity en
+  # riesgo abierto" (Σ acciones x distancia al stop / equity), no como cuatro
+  # posiciones de 1R nominal, que en la práctica serían ~3.1R.
+  max_portfolio_heat_r: 4.0
+  max_per_group:        {sector: 2}
+  circuit_breaker:
+    monthly_drawdown_pct: 6.0
+    peak_drawdown_pct:    15.0
+
+backtest:
+  start:         2010-01-01
+  end:           2025-12-31
+  initial_cash:  10000
+  in_sample_end: 2020-12-31

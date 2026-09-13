@@ -70,6 +70,18 @@
 </div>
 {% endif %}
 
+{% if heat %}
+<h2>Heat de cartera</h2>
+<p class="muted">
+  Riesgo real abierto sobre equity, al cierre de cada vela. Se suma en pesos
+  (acciones × distancia al stop) y no contando R nominales: 4.0 se lee como 4%
+  del equity en riesgo abierto.
+</p>
+<div class="banner">
+  {% for line in heat %}{{ line }}<br>{% endfor %}
+</div>
+{% endif %}
+
 {% if poder %}
 <h2>Poder de medición</h2>
 <p class="muted">
@@ -188,10 +200,33 @@
   </table>
 </div>
 
-{% if rejections %}
+{% if rejection_table %}
 <h2>Señales rechazadas</h2>
+<p class="muted">
+  El backtest refleja las señales que <strong>realmente</strong> se habrían podido
+  tomar, no todas las que aparecieron. Sin esta tabla, un backtest que descarta
+  señales en silencio miente en la dirección optimista.
+</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Categoría</th><th>Señales</th><th>%</th><th>Qué la produjo</th></tr></thead>
+    <tbody>
+    {% for fila in rejection_table %}
+      <tr>
+        <td>{{ fila.categoria }}</td>
+        <td>{{ fila.count }}</td>
+        <td>{{ fila.pct }}</td>
+        <td class="muted">{{ fila.explicacion }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if rejections %}
 <details>
-  <summary>{{ rejections|length }} señales no se pudieron tomar</summary>
+  <summary>{{ rejections|length }} señales no se pudieron tomar (detalle)</summary>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Fecha</th><th>Símbolo</th><th>Motivo</th></tr></thead>

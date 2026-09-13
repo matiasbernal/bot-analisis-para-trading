@@ -396,6 +396,10 @@ def poder_lineas(
 
     lineas += [
         "",
+        "  trailing_stop NO es candidata del torneo: entra por decisión de diseño del PLAN",
+        "  (línea base de las plantillas). Su fila está para dimensionar, no para decidir:",
+        "  con este universo y este período el poder no alcanza para afirmar que aporta.",
+        "",
         "  'disponible' es el **mejor caso** de la capa sobre los trades que toca, medido",
         "  sobre los trades ya cerrados: capturar toda la R que quedó sobre la mesa. Ninguna",
         "  capa real captura todo (un chandelier devuelve 3 ATR antes de sacarte), así que el",
@@ -403,3 +407,46 @@ def poder_lineas(
         "  de todo lo disponible para que el resultado se distinga de un empate.",
     ]
     return lineas
+
+
+# --- proyección a otro universo -------------------------------------------
+#: trades esperables con datos reales: 15 años x 10 símbolos a la frecuencia de
+#: señal de la plantilla (~1.5 trades por símbolo-año, medida sobre los dos
+#: fixtures). Es el universo que la Fase 3 va a tener cuando haya CSV reales, y
+#: el número con el que el PLAN calcula cuántas capas quedan sin poder.
+N_UNIVERSO_REAL = 230
+
+
+def proyectar(filas: Sequence[Poder], n_objetivo: int) -> list[Poder]:
+    """Las mismas capas, con el MDE recalculado para un universo de otro tamaño.
+
+    Lo que se conserva de cada fila es lo que **no** depende de cuántos trades
+    haya: la fracción de trades que la capa toca y el efecto disponible por trade
+    afectado, que son propiedades por trade. Lo que se recalcula es el mínimo
+    detectable, que escala con 1/√(f·n), y la cantidad de trades afectados.
+
+    Sirve para contestar "¿alcanza con los datos reales?" **antes** de tenerlos, y
+    con eso decidir el alcance del torneo en vez de descubrirlo al final. Lo que
+    no hace es adivinar cómo cambian f, σ y el efecto disponible sobre datos de
+    mercado: los tres salen del fixture sintético y ahí valen lo que dice la
+    etiqueta de alcance de ESTADO.md. La proyección es aritmética sobre n, no un
+    pronóstico sobre el mercado.
+    """
+    proyectadas: list[Poder] = []
+    for fila in filas:
+        valor = mde(fila.sigma, n_objetivo, fraccion=fila.fraccion)
+        proyectadas.append(
+            Poder(
+                capa=fila.capa,
+                n=n_objetivo,
+                n_afectados=int(round(fila.fraccion * n_objetivo)),
+                fraccion=fila.fraccion,
+                sigma=fila.sigma,
+                mde_afectado=valor.por_afectado,
+                mde_expectancy=valor.sobre_expectancy,
+                efecto_disponible=fila.efecto_disponible,
+                cota=fila.cota,
+                base=fila.base,
+            )
+        )
+    return proyectadas
