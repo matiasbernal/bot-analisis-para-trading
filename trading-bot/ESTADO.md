@@ -814,3 +814,76 @@ resuelve si el trailing aporta, **habilita** que se mida—, así que no depende
 número que falta. El número que decide si el trailing se queda —cuántos trades
 que llegan a +1R siguen hasta +3R— es una propiedad del mercado y sigue sin
 existir; por eso el trailing queda como candidata y no como capa descartada.
+
+---
+
+## 13. La tolerancia de la validación de precios: por qué 1e-9 y por qué no 1e-6
+
+Bajando los fixtures reales por primera vez en una máquina con salida a Yahoo,
+`fetch_fixture.py SPY --years 15` frenó con:
+
+    SPY: 1 velas con open/close fuera del rango [low, high], p.ej. 2018-01-19
+
+y el dato no está roto. Ese día SPY cerró en su máximo, o sea que en la serie
+sin ajustar `close` **es** `high`, el mismo número. El ajuste retroactivo
+multiplica las dos columnas por el mismo factor pero con distinto orden de
+operaciones, y el resultado no es bit-idéntico: `close` llega 2.8e-14 arriba de
+`high` sobre precios de ~246, exactamente **un ULP** de float64.
+
+No es una rareza de un símbolo. Con ~3800 velas por símbolo y 13 símbolos,
+cualquier día que cierre en el máximo o abra en el mínimo puede disparar lo
+mismo, y son días comunes.
+
+**La tolerancia elegida es `PRICE_REL_TOL = 1e-9`**, y sale de acotar los dos
+extremos que tiene que separar:
+
+| | Magnitud relativa | De dónde sale |
+|---|---|---|
+| Ruido de punto flotante | ~1e-13 | un ULP es 2.2e-16; el ajuste encadena productos acumulados a lo largo de la serie, así que cientos de ULP es un techo generoso |
+| Inconsistencia genuina más chica | ~1e-5 | un feed roto pone el cierre fuera del rango por al menos un tick de un centavo: 1e-5 sobre un instrumento de $1000, 4e-5 sobre los ~$250 de SPY |
+
+1e-9 es el punto medio geométrico: cuatro órdenes de magnitud por encima del
+ruido y cuatro por debajo del error más chico que vale la pena rechazar. No es
+un número redondo elegido a ojo, es el centro del hueco de ocho órdenes que hay
+entre las dos cosas que el chequeo tiene que distinguir.
+
+**Por qué NO se unificó con el `TOLERANCE = 1e-6` de `data/cache.py`**, aunque
+los dos absorban ruido de punto flotante y unificar sea tentador: **responden
+preguntas distintas y tienen costos de error distintos**.
+
+- El de `cache.py` compara la misma vela bajada dos veces para decidir si Yahoo
+  reajustó la serie. Equivocarse por lo bajo cuesta **una descarga de más**, que
+  es molesto y nada más. Y el error genuino que busca —un dividendo— es del
+  orden de 1e-3, así que 1e-6 le sobra por tres órdenes.
+- El de `validate.py` decide si datos rotos entran a un backtest. Equivocarse
+  por lo alto **no cuesta nada visible**: da un resultado perfecto y falso, que
+  es el modo de falla que este repo trata como el peor de todos.
+
+Para el chequeo que importa se toma el valor más ajustado que igual absorbe el
+ruido, no el número que ya estaba escrito en otro lado. La consistencia entre
+módulos no es un argumento cuando los módulos no están haciendo lo mismo.
+
+**Qué chequeos llevan tolerancia y cuáles no.** Solo los que comparan un precio
+de la vela contra otro precio de la misma vela, porque son los únicos donde el
+dato original tiene dos columnas que valen lo mismo y el ajuste las separa: son
+cuatro (`high < low`, `open` y `close` contra `high` y contra `low`). Los otros
+no la necesitan y no la llevan: `precio <= 0` compara contra una constante,
+el volumen es un entero que el factor de ajuste de precios no toca, el salto de
+50% es un umbral de criterio y no un punto donde dos números que deberían ser
+iguales se separan, y el calendario compara fechas. El razonamiento está también
+en el docstring de `validate_ohlcv`, para que no haya que venir acá.
+
+### El corolario: los reintentos no eran para esto
+
+La misma corrida mostró un segundo problema. El script reintentó **tres veces
+con backoff** (2s, 4s) una falla de validación, que es determinística: la serie
+llegó entera y los tres intentos bajan los mismos bytes y los rechazan por el
+mismo motivo. Seis segundos para llegar al mismo resultado, y multiplicado por
+13 símbolos.
+
+La separación quedó en `EmptySeriesError`, subclase de `DataValidationError`.
+Es la única falla de validación que puede ser transitoria, porque **el 429 de
+Yahoo no llega como excepción de red sino como serie vacía** —esa es la razón
+por la que la serie vacía estaba metida en el mismo cajón que todo lo demás—.
+`es_transitorio` reintenta eso y cualquier cosa que no sea un
+`DataValidationError`; el resto corta en el primer intento.
