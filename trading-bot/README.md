@@ -155,6 +155,28 @@ Hasta que existan, los tests que los usan se saltean con el motivo. Los
 sintéticos (`tests/fixtures/synthetic/`) son determinísticos y ya están; se
 regeneran con `python scripts/make_synthetic_fixtures.py`.
 
+## Los scripts de análisis
+
+Cuatro scripts que no son parte del producto: contestan una pregunta concreta y
+dejan el número para pegarlo en una discusión. **Ninguno decide nada** — los
+cuatro corren sobre fixtures sintéticos y valen lo que dice la etiqueta de
+alcance de [`ESTADO.md`](ESTADO.md) sección 2.
+
+```bash
+python scripts/poder.py --proyectar 230   # MDE por capa, proyectado al universo real
+python scripts/riesgo_realizado.py        # cuánto vale 1R de verdad, y quién decide el tamaño
+python scripts/barrido_trailing.py        # el chandelier con multiple 2-5 x activación 0.5-2R
+python scripts/contrafactico_trailing.py  # qué habría pasado aguantando en vez de trailear
+```
+
+Los dos últimos salieron de una pregunta que abrió el informe v3: si el trailing
+empeora el resultado sobre el fixture, ¿es la capa o son sus dos parámetros? El
+barrido contesta la primera mitad y el contrafáctico la segunda, con el detalle
+trade por trade. **Los dos exploran, no recomiendan**: elegir un multiplicador
+porque da mejor CAGR sobre un random walk es calibrar contra el generador, que es
+justamente el error que la sección 2 de `ESTADO.md` existe para evitar. El
+análisis completo, con el mecanismo, está en `ESTADO.md` sección 12.
+
 ## Leer el informe
 
 El orden en que conviene mirarlo:
