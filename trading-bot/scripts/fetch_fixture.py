@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-"""Baja datos reales a ``tests/fixtures/`` para usarlos como fixture.
+"""Baja datos reales a ``tests/fixtures/real/`` para usarlos como fixture.
 
 Se corre donde haya salida a Yahoo (tu máquina, o el sandbox si la política de
 red del entorno lo permite) y el resultado se commitea:
 
     python scripts/fetch_fixture.py SPY AAPL
-    python scripts/fetch_fixture.py --years 15 --out tests/fixtures/etfs XLK XLF ...
+    python scripts/fetch_fixture.py --start 2010-01-01 --end 2025-12-31 XLK XLF ...
 
 Hasta que existan esos CSV, los tests que los usan se saltean con el motivo.
 No bloquean nada.
@@ -49,6 +49,15 @@ from tradingbot.data.provider import Provider
 from tradingbot.data.validate import DataValidationError, EmptySeriesError, validate_ohlcv
 
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "fixtures"
+
+#: Destino por defecto de los CSV reales, y **no** es ``FIXTURES`` a secas.
+#: ``LocalCsvProvider`` busca ``<root>/SYM.csv`` antes que
+#: ``<root>/synthetic/SYM.csv``, así que un ``SPY.csv`` real escrito en la raíz
+#: de ``tests/fixtures/`` le pisaría el sintético al universo "independiente (4)"
+#: y ese universo pasaría a ser mitad real y mitad sintético en silencio. El
+#: subdirectorio es lo que hace que la precedencia no se pueda disparar sola.
+#: `tests/test_fixtures_reales.py` falla si este default vuelve a la raíz.
+DESTINO_REAL = FIXTURES / "real"
 
 #: pausa entre símbolos. Yahoo tolera ~1 pedido cada 0.5 s sostenido
 PAUSA_DEFAULT = 0.5
@@ -223,12 +232,15 @@ def bajar_universo(
     return fallaron
 
 
-def main(argv: list[str] | None = None) -> int:
+def construir_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("symbols", nargs="+", help="Símbolos a bajar (p.ej. SPY AAPL)")
     parser.add_argument("--years", type=int, default=3, help="Años de historia (default 3)")
     parser.add_argument(
-        "--out", type=Path, default=FIXTURES, help="Directorio destino (default tests/fixtures)"
+        "--out",
+        type=Path,
+        default=DESTINO_REAL,
+        help="Directorio destino (default tests/fixtures/real; ver DESTINO_REAL)",
     )
     parser.add_argument(
         "--provider", choices=["yahoo", "stooq"], default="yahoo", help="Fuente de datos"
@@ -249,7 +261,11 @@ def main(argv: list[str] | None = None) -> int:
         default=REINTENTOS_DEFAULT,
         help=f"Intentos por símbolo ante fallo transitorio (default {REINTENTOS_DEFAULT})",
     )
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = construir_parser().parse_args(argv)
 
     if args.provider == "yahoo":
         from tradingbot.data.yahoo import YahooProvider

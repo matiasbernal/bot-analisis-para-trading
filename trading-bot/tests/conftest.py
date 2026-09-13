@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from functools import lru_cache
 from pathlib import Path
@@ -19,7 +20,22 @@ from tradingbot.config import StrategyConfig  # noqa: E402
 from tradingbot.data.validate import validate_ohlcv  # noqa: E402
 
 FIXTURES_DIR = TESTS_DIR / "fixtures"
-REAL_FIXTURES = ("SPY", "AAPL")
+
+#: Los CSV reales viven en un subdirectorio y NO sueltos en ``tests/fixtures/``,
+#: y eso no es prolijidad. ``LocalCsvProvider`` busca ``<root>/SYM.csv`` ANTES
+#: que ``<root>/synthetic/SYM.csv``: un ``SPY.csv`` real en la raíz le pisaría el
+#: sintético al universo "independiente (4)" de `poder.py` y `universo.py`, que
+#: pasaría a ser mitad real y mitad sintético sin que nada avise.
+#: `test_fixtures_reales.py` falla si esa contaminación vuelve a ser posible.
+REAL_FIXTURES_DIR = FIXTURES_DIR / "real"
+
+#: Los 13 ETFs bajados a mano (ver `scripts/fetch_fixture.py`). XLRE arranca en
+#: 2016 y no en 2010: se escindió de XLF en octubre de 2015 y sus primeros meses
+#: tienen velas con volumen cero.
+REAL_FIXTURES = (
+    "SPY", "QQQ", "IWM",
+    "XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLB", "XLRE",
+)
 
 
 YAHOO_PING = "https://query1.finance.yahoo.com/v8/finance/chart/SPY?range=5d&interval=1d"
@@ -73,15 +89,21 @@ requires_stooq = _skip_if_unreachable(STOOQ_PING, "Stooq")
 
 
 def real_fixture_path(symbol: str) -> Path:
-    return FIXTURES_DIR / f"{symbol.upper()}.csv"
+    return REAL_FIXTURES_DIR / f"{symbol.upper()}.csv"
+
+
+def sidecar_real(symbol: str) -> dict:
+    """El JSON que `fetch_fixture.py` escribe al lado de cada CSV."""
+    return json.loads(real_fixture_path(symbol).with_suffix(".json").read_text(encoding="utf-8"))
 
 
 def requires_real_fixture(symbol: str):
     return pytest.mark.skipif(
         not real_fixture_path(symbol).is_file(),
         reason=(
-            f"falta tests/fixtures/{symbol.upper()}.csv; generalo en tu máquina con "
-            f"`python scripts/fetch_fixture.py {symbol.upper()}`"
+            f"falta tests/fixtures/real/{symbol.upper()}.csv; generalo en tu máquina con "
+            f"`python scripts/fetch_fixture.py {symbol.upper()} --start 2010-01-01 "
+            f"--end 2025-12-31 --out tests/fixtures/real`"
         ),
     )
 
