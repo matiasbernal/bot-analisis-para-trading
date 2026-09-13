@@ -29,8 +29,8 @@ import pandas as pd
 
 from tradingbot.backtest.engine import run_backtest
 from tradingbot.config import load_strategy
-from tradingbot.data.local import LocalCsvProvider
 from tradingbot.consola import forzar_utf8
+from tradingbot.data.local import LocalCsvProvider
 
 
 def main(argv: list[str] | None = None) -> int:

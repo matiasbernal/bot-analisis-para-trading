@@ -34,9 +34,9 @@ import yaml
 from tradingbot.backtest.ab import emparejar
 from tradingbot.backtest.engine import run_backtest
 from tradingbot.config import StrategyConfig
+from tradingbot.consola import forzar_utf8
 from tradingbot.data.local import LocalCsvProvider
 from tradingbot.strategy.exits import REASON_TRAILING
-from tradingbot.consola import forzar_utf8
 
 RAIZ = Path(__file__).resolve().parents[1]
 PLANTILLA = RAIZ / "config/strategies/ema_cross.yaml"

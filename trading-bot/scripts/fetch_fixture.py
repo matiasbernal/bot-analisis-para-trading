@@ -44,10 +44,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from tradingbot.consola import forzar_utf8
 from tradingbot.data.cache import OVERLAP_BARS, CacheMeta, ParquetCache
 from tradingbot.data.provider import Provider
 from tradingbot.data.validate import DataValidationError, EmptySeriesError, validate_ohlcv
-from tradingbot.consola import forzar_utf8
 
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "fixtures"
 

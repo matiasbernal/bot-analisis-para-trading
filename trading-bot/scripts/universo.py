@@ -16,13 +16,21 @@ medir sin bajar datos nuevos y proyecta la cuarta:
    dado, y cuántos símbolo-años son eso.
 
     python scripts/universo.py
-    python scripts/universo.py --ritmo 2.4      # con el ritmo real, cuando se mida
+    python scripts/universo.py --plantilla config/strategies/ema_cross_sin_trailing.yaml
+    python scripts/universo.py --ritmo 2.4      # con un ritmo puesto a mano
+    python scripts/universo.py --datos tests/fixtures/correlated   # insumos sintéticos
 
-**La etiqueta de alcance**: el ritmo, σ, la fracción por capa y el efecto
-disponible salen de fixtures **sintéticos** (ver ESTADO.md §2). La aritmética
-sobre *n* es exacta; los insumos valen lo que vale el fixture. El ritmo real se
-mide bajando 3-4 símbolos de verdad, y por eso `--ritmo` existe: cuando haya
-ese número, la tabla se rehace sin tocar el código.
+**La etiqueta de alcance, que cambió el día que hubo datos reales.** Mientras el
+único fixture era sintético, el ritmo, σ, la fracción por capa y el efecto
+disponible salían de ahí (ver ESTADO.md §2) y la tabla entera arrastraba esa
+etiqueta. Desde que existe `tests/fixtures/real/`, los insumos salen de los 13
+ETFs de verdad y el default de `--datos` es ese directorio: la etiqueta ya no
+aplica a la fila que se mide, solo a las dos opciones de universo que siguen
+siendo proyecciones (33 y 40 símbolos, que no están bajados).
+
+La aritmética sobre *n* es exacta en los dos casos; lo que cambia es qué valen
+los insumos. `--datos` y `--ritmo` siguen ahí para poder rehacer la tabla con
+cualquiera de los dos juegos y comparar.
 """
 
 from __future__ import annotations
@@ -42,11 +50,19 @@ from tradingbot.backtest.poder import (
     trades_necesarios,
 )
 from tradingbot.config import StrategyConfig
-from tradingbot.data.local import LocalCsvProvider
 from tradingbot.consola import forzar_utf8
+from tradingbot.data.local import LocalCsvProvider
+from tradingbot.strategy.portfolio_risk import GroupLabelError
 
 RAIZ = Path(__file__).resolve().parents[1]
 FIXTURES = RAIZ / "tests" / "fixtures"
+
+#: Los 13 ETFs bajados a mano. Viven en un subdirectorio y no sueltos en
+#: FIXTURES porque `LocalCsvProvider` le da precedencia a la raíz sobre
+#: `synthetic/`: sueltos, le pisarían el sintético al universo
+#: "independiente (4)" de acá abajo (ver tests/test_fixtures_reales.py).
+REALES = FIXTURES / "real"
+NOMBRE_REAL = "real ETFs (13)"
 ESTRATEGIAS = RAIZ / "config" / "strategies"
 
 #: velas por año de un mercado de acciones de EE.UU.
@@ -198,6 +214,17 @@ def techo_por_cupo(max_open: int, duracion_bars: float, anios: float) -> int:
     return int(round(max_open / (duracion_bars / VELAS_POR_ANIO) * anios))
 
 
+#: el corte del PLAN (§2.2): una capa es decidible si alcanza con que capture un
+#: tercio de su efecto disponible para que el resultado se distinga del ruido
+CORTE = 1 / 3
+
+
+def _bajo_el_corte(fila) -> bool:
+    if fila.efecto_disponible <= 0:
+        return False
+    return fila.mde_afectado / fila.efecto_disponible <= CORTE
+
+
 def n_para_exigencia(fila, exigencia: float) -> int:
     """Trades que hacen falta para que la capa se vea capturando ``exigencia`` de lo disponible."""
     if fila.efecto_disponible <= 0:
@@ -262,16 +289,26 @@ def main(argv: list[str] | None = None) -> int:
         default=ESTRATEGIAS / "ema_cross.yaml",
         help="Plantilla de la que sale el poder por capa",
     )
+    parser.add_argument(
+        "--datos",
+        type=Path,
+        default=None,
+        help="Fixture del que salen σ, f, el efecto disponible y la duración media. "
+        "Default: tests/fixtures/real si existe, si no el correlacionado",
+    )
     args = parser.parse_args(argv)
 
     universos = {
         "sintético independiente (4)": (FIXTURES, None),
         "sintético correlacionado (10)": (FIXTURES / "correlated", []),
     }
+    if REALES.is_dir() and any(REALES.glob("*.csv")):
+        universos[NOMBRE_REAL] = (REALES, [])
     plantillas = sorted(ESTRATEGIAS.glob("*.yaml"))
 
     print("=" * 94)
-    print("1. RITMO DE TRADES MEDIDO — sobre los fixtures que hay (sintéticos, ver ESTADO.md §2)")
+    print("1. RITMO DE TRADES MEDIDO — sobre los fixtures que hay (ver ESTADO.md §2 para los "
+          "sintéticos)")
     print("=" * 94)
     print("  plantilla                      universo                 símb  símb-año  trades  "
           "t/s-año  rech.")
@@ -285,7 +322,14 @@ def main(argv: list[str] | None = None) -> int:
             provider = LocalCsvProvider(datos)
             if not all(provider.has(s) for s in pedidos):
                 continue
-            ritmo, _ = medir_ritmo(plantilla, nombre, datos, simbolos)
+            try:
+                ritmo, _ = medir_ritmo(plantilla, nombre, datos, simbolos)
+            except GroupLabelError as exc:
+                # `cartera_correlacionada` pide `max_per_group` y los 13 ETFs no
+                # están etiquetados en universe.yaml. No se inventa la etiqueta
+                # para llenar la fila: se dice que esa combinación no se midió.
+                print(f"  {plantilla.stem:<30} {nombre:<24}  no medible: {exc}".rstrip())
+                continue
             ritmos[f"{plantilla.stem}|{nombre}"] = ritmo
             print(
                 f"  {ritmo.plantilla:<30} {ritmo.universo:<24} {ritmo.simbolos:>4}  "
@@ -296,14 +340,23 @@ def main(argv: list[str] | None = None) -> int:
     print("  'rech.' son señales que el cupo de cartera no dejó tomar. Sobre un universo más")
     print("  grande ese número crece y el ritmo por símbolo-año baja: no es lineal en símbolos.")
 
-    base = ritmos.get(f"{args.plantilla.stem}|sintético correlacionado (10)")
+    # De dónde salen los insumos: el fixture real si está, y el correlacionado
+    # si no. Es la única diferencia que importa entre correr esto antes y después
+    # de bajar los datos, y por eso se imprime en vez de quedar implícito.
+    datos_base = args.datos or (REALES if NOMBRE_REAL in universos else FIXTURES / "correlated")
+    nombre_base = next(
+        (n for n, (d, _) in universos.items() if d == datos_base), str(datos_base)
+    )
+    base = ritmos.get(f"{args.plantilla.stem}|{nombre_base}")
     if base is None:
-        print(f"\nno se pudo medir {args.plantilla.stem} sobre el universo correlacionado")
+        print(f"\nno se pudo medir {args.plantilla.stem} sobre {nombre_base}")
         return 1
     ritmo_usado = args.ritmo if args.ritmo is not None else base.por_simbolo_anio
-    fuente_ritmo = "pasado por --ritmo" if args.ritmo else f"medido: {base.plantilla}, sintético"
+    fuente_ritmo = (
+        "pasado por --ritmo" if args.ritmo else f"medido: {base.plantilla}, {nombre_base}"
+    )
 
-    resultado, _, strategy = corrida(args.plantilla, FIXTURES / "correlated", [])
+    resultado, _, strategy = corrida(args.plantilla, datos_base, [])
     trades = resultado.rule_trades
     sigma = sigma_a_priori(trades)
     filas = poder_por_capa(trades, spy=resultado.spy_data, sigma=sigma)
@@ -317,19 +370,38 @@ def main(argv: list[str] | None = None) -> int:
     print(f"2. LAS OPCIONES DE UNIVERSO — {args.anios:.0f} años, {ritmo_usado:.2f} trades por "
           f"símbolo-año ({fuente_ritmo})")
     print("=" * 94)
-    sin_cupo, _, _ = corrida(args.plantilla, FIXTURES / "correlated", [], cupo=99)
+    sin_cupo, _, _ = corrida(args.plantilla, datos_base, [], cupo=99)
     tomados, habia = len(trades), len(sin_cupo.rule_trades)
     print(f"  El cupo de cartera pone un techo que no depende del universo: {cupo} posiciones")
     print(f"  simultáneas, {duracion:.0f} velas de duración media, dan {techo / args.anios:.0f} "
           f"trades por año = {techo} en {args.anios:.0f} años,")
     print("  haya 13 símbolos o 40. Y es un techo optimista: supone señales repartidas en el")
     print("  tiempo, y las de un universo correlacionado llegan juntas. Medido sobre el fixture")
-    print(f"  correlacionado (10 símbolos): con cupo {cupo} se tomaron {tomados} trades y sin cupo "
+    print(f"  {nombre_base}: con cupo {cupo} se tomaron {tomados} trades y sin cupo "
           f"habría habido {habia}")
-    print(f"  ({100 * (habia - tomados) / habia:.0f}% perdido con 10 símbolos, lejos del techo "
-          "por carga media). Esa fracción")
+    print(f"  ({100 * (habia - tomados) / habia:.0f}% perdido con {base.simbolos} símbolos, lejos "
+          "del techo por carga media). Esa fracción")
     print("  crece con el universo y no se puede medir con los fixtures que hay: por eso las dos")
     print("  columnas de abajo son cota superior, y más floja cuanto más grande el universo.")
+    print("")
+    # Y cuál de los dos controles ata de verdad, que no es obvio: el cupo de
+    # posiciones y el cash compiten por rechazar la misma señal, y sobre datos
+    # reales gana el cash. Sin esto, "subir max_open_positions destraba el techo"
+    # parece una palanca y no lo es.
+    motivos: dict[str, int] = {}
+    for rechazo in resultado.rejections:
+        motivos[rechazo.reason.split(":")[0]] = motivos.get(rechazo.reason.split(":")[0], 0) + 1
+    print(f"  Qué rechaza las señales, sobre {nombre_base} ({len(resultado.rejections)} rechazos):")
+    for motivo, cuantos in sorted(motivos.items(), key=lambda kv: -kv[1]):
+        print(f"    {cuantos:>4}  {motivo}")
+    print(f"  Subir el cupo de {cupo} a 99 lleva los trades de {tomados} a {habia}: si el que ata "
+          "es el cash")
+    print("  y no el cupo, tocar max_open_positions no compra n.")
+    print("")
+    print(f"  Y la primera fila de la tabla de abajo es una PROYECCIÓN a {args.anios:.0f} años del "
+          "ritmo medido,")
+    print(f"  no la medición: el fixture de {nombre_base} tiene {base.simbolo_anios:.0f} "
+          f"símbolo-años útiles y dio {base.trades} trades.")
     print("")
     print("  opción                                símb  símb-año útil   señales   n con cupo   "
           "capas estim.")
@@ -368,6 +440,32 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"    {fila.capa:<15} {fila.n_afectados:>4}  {fila.fraccion:5.2f}  "
                 f"{fila.mde_afectado:8.2f}R  {fila.efecto_disponible:8.2f}R  {fila.veredicto}"
+            )
+
+    # El torneo no tiene esos n. Cada capa se decide **dentro del in-sample**
+    # (PLAN.md §"El torneo de capas"), y el out-of-sample se gasta una sola vez
+    # al final. La tabla de arriba proyecta sobre el período entero, así que hay
+    # que descontar la fracción que queda reservada — medida, no supuesta.
+    corte_is = strategy.backtest.in_sample_end
+    if corte_is is not None:
+        dentro = [t for t in trades if pd.Timestamp(t.entry_date) <= pd.Timestamp(corte_is)]
+        fraccion_is = len(dentro) / len(trades) if trades else 0.0
+        print("")
+        print(f"  EL n QUE EL TORNEO REALMENTE TIENE — in-sample hasta {corte_is}")
+        print(f"    Medido sobre {nombre_base}: {len(dentro)} de {len(trades)} trades entran "
+              f"({fraccion_is:.0%}). El resto")
+        print("    queda reservado y se gasta una sola vez, al final, así que no cuenta para")
+        print("    decidir ninguna capa.")
+        print("")
+        print("    opción                                n total   n in-sample   capas bajo el "
+              "corte de 1/3")
+        for opcion in OPCIONES:
+            n, _ = proyecciones[opcion.nombre]
+            n_is = int(round(n * fraccion_is))
+            pasan = [f.capa for f in proyectar(filas, n_is) if _bajo_el_corte(f)]
+            print(
+                f"    {opcion.nombre:<36} {n:>7}   {n_is:>11}   "
+                f"{len(pasan)}: {', '.join(pasan) or '(ninguna)'}"
             )
 
     print("")

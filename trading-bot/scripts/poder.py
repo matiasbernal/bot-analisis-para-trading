@@ -30,8 +30,8 @@ from tradingbot.backtest.poder import (
     trades_necesarios,
 )
 from tradingbot.config import StrategyConfig
-from tradingbot.data.local import LocalCsvProvider
 from tradingbot.consola import forzar_utf8
+from tradingbot.data.local import LocalCsvProvider
 
 RAIZ = Path(__file__).resolve().parents[1]
 PLANTILLA = RAIZ / "config/strategies/ema_cross.yaml"
