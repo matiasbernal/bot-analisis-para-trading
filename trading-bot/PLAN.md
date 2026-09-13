@@ -869,12 +869,14 @@ plantillas dice que arrancan con dos capas prendidas (hard stop + trailing), as�
 trailing no compite en el torneo, es lo que el resto tiene que superar. `event_risk` queda
 fuera de 2C por la red, con la decisión escrita arriba.
 
-#### Lo que el loteo todavía no decía: con datos reales el torneo decide dos capas, no seis
+#### Lo que el loteo todavía no decía: con datos reales el torneo no decide casi nada
 
-*(Agregado al cerrar 2A+2B. No es una decisión, es el número puesto sobre la mesa.)*
+*(Agregado al cerrar 2A+2B. **Recalculado después**, cuando el informe v3 mostró que la
+proyección se había hecho sobre la línea base equivocada. No es una decisión, es el
+número puesto sobre la mesa.)*
 
 El cálculo de poder por capa se hizo sobre los fixtures, que dan 30 trades (4 símbolos,
-5 años) y 73 (10 símbolos, 5 años). La pregunta que faltaba contestar es qué pasa con el
+5 años) y 73-75 (10 símbolos, 5 años). La pregunta que faltaba contestar es qué pasa con el
 universo que la Fase 3 va a tener de verdad: **15 años × 10 símbolos ≈ 230 trades**, a la
 frecuencia de señal de la plantilla (~1.5 trades por símbolo-año, medida sobre los dos
 fixtures). El MDE va con 1/√(f·n), así que proyectar es aritmética: misma *f*, mismo σ,
@@ -882,39 +884,125 @@ mismo efecto disponible, y solo cambia *n*.
 
     python scripts/poder.py --proyectar 230
 
-| capa | exigencia a n=230, universo indep. | exigencia a n=230, universo correlacionado |
-|---|---|---|
-| `trailing_stop` (línea base, no compite) | 23% | 21% |
-| `time_stop` | **23%** | **27%** |
-| `market_regime` | 34% | 54% |
-| `giveback` | 42% | 32% |
-| `break_even` | **55%** | **67%** |
-| `reversal` | no estimable sin la capa escrita | ídem |
-| `event_risk` | no estimable sin red | ídem |
+##### El error que tenía la primera versión de esta sección
+
+**La proyección original se corrió sobre `ema_cross_sin_trailing.yaml`, y esa no es la
+línea base.** El PLAN declara que las plantillas arrancan con hard stop **+ trailing**, así
+que la configuración contra la que el torneo va a medir es la v3, con el chandelier
+prendido. Y la línea base no es un detalle de la corrida: **define cuánta R queda sobre la
+mesa para que las otras capas la capturen**. Un trailing que corta los trades antes se
+lleva puesto justo el efecto disponible de las capas de salida que vienen después.
+
+Las dos tablas, a n=230, con la misma aritmética y lo único distinto siendo qué corrida
+generó los trades:
+
+| capa | indep. SIN trailing | indep. **CON trailing (real)** | corr. SIN trailing | corr. **CON trailing (real)** |
+|---|---|---|---|---|
+| `trailing_stop` (línea base, no compite) | 23% | 20% | 21% | 22% |
+| `time_stop` | **23%** | 66% | **27%** | 43% |
+| `giveback` | 42% | 56% | 32% | 59% |
+| `market_regime` | 34% | 50% | 54% | 83% |
+| `break_even` | 55% | **NO medible** | 67% | **NO medible** |
+| `reversal` | no estimable sin la capa escrita | ídem | ídem | ídem |
+| `event_risk` | no estimable sin red | ídem | ídem | ídem |
 
 "Exigencia" es `MDE por trade afectado / efecto disponible`: qué fracción del **mejor
 caso** —capturar toda la R que el trade dejó sobre la mesa— tiene que lograr la capa, en
 cada trade que toca, para que el resultado se distinga de un empate. El criterio para
-leerla no es el flag binario `medible` (que a n=230 se prende para todas): ese flag es
-condición necesaria y nada más. Ninguna capa real captura su mejor caso —un chandelier
-devuelve 3 ATR antes de sacarte, un break-even sale exactamente en cero cuando el trade
-habría vuelto—, así que **una exigencia por encima de ~1/3 no es una capa medible: es una
-capa a la que le vamos a pedir un milagro y vamos a leer el empate como "no aporta"**.
+leerla no es el flag binario `medible`: ese flag es condición necesaria y nada más.
+Ninguna capa real captura su mejor caso —un chandelier devuelve 3 ATR antes de sacarte, un
+break-even sale exactamente en cero cuando el trade habría vuelto—, así que **una exigencia
+por encima de ~1/3 no es una capa medible: es una capa a la que le vamos a pedir un
+milagro y vamos a leer el empate como "no aporta"**.
 
-Con ese corte, y contando las seis capas del torneo:
+##### El mecanismo: el trailing no agrega ruido, saca efecto disponible
 
-- **Se deciden dos**: `time_stop` (21-27% en los dos universos) y `reversal`, que no se
-  puede proyectar sin escribirla pero no hay razón para esperarle una *f* chica —toca
-  cualquier trade que dure lo suficiente como para acumular dos señales.
-- **Quedan sin poder cuatro**: `break_even` (55-67%, el único que falla claramente en los
-  dos universos), `giveback` y `market_regime` (borde: 42/32% y 34/54%, y **los dos
-  universos se contradicen sobre cuál de los dos está peor**, que es exactamente lo que
-  hay que esperar cuando el número está en el borde), y `event_risk`, que no entra por la
-  red y ya tenía su decisión escrita.
+Lo que se mueve entre las dos tablas no es el ruido. El σ del efecto **baja** con el
+trailing prendido (1.43R → 1.18R en el independiente, 1.39R → 1.20R en el correlacionado),
+porque el chandelier comprime la distribución de resultados, y por eso el MDE por trade
+afectado también baja (0.33R → 0.27R para `time_stop`). Lo que se derrumba es el
+denominador:
 
-O sea: **aun con los datos descargados, el torneo va a poder decidir dos capas y va a
-tener que declarar cuatro "no medibles con este universo"**. Eso no es un fracaso del
-torneo, es el resultado del torneo, y el informe lo tiene que decir así.
+| capa | efecto disponible SIN trailing | CON trailing |
+|---|---|---|
+| `break_even` | 0.99R | **0.16R** |
+| `time_stop` | 1.63R | 0.69R |
+| `giveback` | 1.40R | 0.64R |
+
+O sea: **medir se volvió más fácil y no alcanzó, porque quedó mucho menos para medir.** El
+trailing se come la R que las otras capas de salida tenían para capturar — que es lo
+esperable, porque todas hacen la misma cosa (sacarte antes) y compiten por el mismo
+recurso.
+
+##### Con la línea base real no queda ninguna capa medible
+
+Con el corte de ~1/3 y las seis capas del torneo:
+
+- **Se decide ninguna de las cuatro estimables.** `time_stop`, que era la única que pasaba
+  holgada en los dos universos (23/27%), se va a 66/43%. `giveback` a 56/59%,
+  `market_regime` a 50/83%, y `break_even` deja de ser medible incluso con el flag
+  binario: su efecto disponible (0.16R indep., 0.27R corr.) es **menor que el MDE**, así
+  que no se distingue del ruido ni capturando el 100% del mejor caso.
+- **Queda una capa por evaluar y no se puede proyectar**: `reversal`, que no tiene número
+  porque la capa no está escrita.
+- **Y `event_risk` sigue afuera** por la red, con su decisión ya escrita.
+
+O sea: **con la línea base que realmente va a estar corriendo, el torneo de la 2C se
+reduce a evaluar una sola capa, y es justo la única que no se puede dimensionar de
+antemano.** Un torneo de una capa no es un torneo: es una comparación A/B, que es lo que el
+banco ya hace.
+
+##### Esto confirma, con un caso, que el orden del torneo decide el resultado
+
+Ya estaba escrito que "el resultado del torneo depende del orden, así que el orden se
+registra con el resultado". Acá hay el caso concreto que lo demuestra, y es más fuerte que
+la frase: **la línea base no cambia el ranking de las capas, cambia cuáles son medibles.**
+Con `trailing_stop` apagado, `time_stop` necesita capturar el 23% y es la mejor candidata
+del torneo. Con `trailing_stop` prendido —que es la misma decisión de siempre, tomada por
+diseño y no medida— `time_stop` necesita el 66% y sale del torneo sin haber sido evaluada.
+
+La consecuencia operativa, que va más allá de este caso: **cada capa que se prende reduce
+el poder disponible para todas las que vienen después**, porque se lleva parte del efecto
+que quedaba por capturar. El torneo no es "medir seis capas", es "gastar un presupuesto de
+efecto disponible en un orden", y el orden hay que elegirlo sabiendo eso. Prender primero
+la capa más agresiva —que es lo que el PLAN hace con el chandelier de 3 ATR— es gastar el
+presupuesto antes de empezar.
+
+##### Las salidas, replanteadas
+
+La versión anterior planteaba dos. Con la tabla corregida hay tres, y la primera cambió de
+significado:
+
+1. **Aceptarlo.** Las capas no medibles caen por la primera regla de desempate —el default
+   es apagada, la carga de la prueba es de la capa— y quedan apagadas **con el motivo
+   escrito**: "no medible con este universo", que no es lo mismo que "medida y descartada".
+   Con la tabla vieja esto apagaba cuatro capas de seis; con la corregida apaga **cinco de
+   seis**, y la sexta no se puede proyectar. El costo dejó de ser aceptable sin discutirlo:
+   ya no es "el torneo decide menos de lo que queríamos", es "el torneo no decide".
+2. **Ampliar el universo o el período.** Más símbolos bajan el MDE con 1/√n, pero elegir
+   hoy los símbolos de los últimos 15 años **trae sesgo de supervivencia** —el que el PLAN
+   ya marca como el que no se arregla del todo—, y lo trae justo en la dirección peor: un
+   universo de sobrevivientes tiene menos rachas malas, que son los trades donde
+   `break_even` y `market_regime` tendrían algo que hacer. Ampliar con ETFs amplios (que no
+   quiebran ni se deslistan) es el camino limpio, pero hay pocos con 15 años y están muy
+   correlacionados entre sí, así que suman menos *n* efectivo del que aparentan. Una
+   variante honesta es ampliar el **período** en vez del universo: 25 años en vez de 15
+   sobre los mismos ETFs no agrega sesgo de selección, pero mete dos regímenes de mercado
+   distintos adentro del in-sample, que es un problema diferente y no menor.
+   **Cuánto haría falta**: el MDE va con 1/√n, así que bajar `time_stop` de 66% a 33% pide
+   **4× los trades** (≈ 920), y llevar `break_even` a medible pide bastante más. Ampliar no
+   es un ajuste, es otro proyecto de datos.
+3. **Revisar la línea base** (nueva, y la única que no cuesta datos). Si el trailing es lo
+   que consume el efecto disponible, la pregunta es si tiene que estar prendido por diseño.
+   No se decide acá: el análisis está en la sección de abajo, la decisión es del usuario, y
+   el PLAN no se cambia sin ella.
+
+No se decide nada acá. Se decide cuando estén los CSV y el número real esté medido en vez
+de proyectado, porque la *f* y el σ de arriba salen de series sintéticas y ahí valen lo que
+dice la etiqueta de alcance de `ESTADO.md`, sección 2: sirven para dimensionar el
+problema, no para cerrarlo. Lo que **no** depende de los sintéticos es el mecanismo —que
+la línea base consume efecto disponible— porque eso es aritmética de qué le queda a la
+capa siguiente, no una propiedad del generador.
 
 **Las dos salidas, planteadas y sin decidir:**
 
