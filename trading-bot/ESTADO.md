@@ -81,6 +81,34 @@ estrategia, y no lo es.
 | Ejemplos | el trailing nunca baja el stop · el gap llena en la apertura y no en el precio del stop · el heat rechaza la sexta señal · la atribución de salidas suma el total de trades · `max_per_group` deja una señal afuera | el trailing mejora la expectancy · `giveback` aporta sobre el trailing ya fijo · el filtro de régimen paga lo que cuesta |
 | ¿Sirven los sintéticos? | **Sí, y son mejores que datos reales**: la serie es determinística y las velas a mano no tienen ambigüedad | **No, y el resultado no es "débil" sino que no significa nada** |
 
+### El fixture estresado de gaps: prueba mecánica, no realismo
+
+Hay un tercer fixture que no entra en la tabla de arriba sin una aclaración, y la
+aclaración es la misma que la de la fila derecha: **este fixture prueba mecánica,
+no realismo.**
+
+`test_gaps_correlacionados_saltan_varios_stops_la_misma_manana` no usa el
+universo correlacionado por defecto sino una versión **estresada**:
+`gap_volatility=0.05` (16× la de por defecto) y stops de `0.75×ATR` en vez de
+`2.0×ATR`. Y esos dos parámetros **se eligieron contra el resultado deseado**: se
+subieron hasta que el fixture produjera 5 mañanas con 2 o más stops saltando
+juntos, porque con los parámetros normales casi ningún gap llega al stop y no
+había escenario que probar.
+
+Eso es legítimo **para la pregunta que el test hace**, que es de motor: *¿el heat
+se recalcula bien después de varios stops simultáneos?* La guardia no lleva
+contador incremental justamente para sobrevivir esa mañana, y sin la mañana el
+invariante no se ejercita nunca. El test verifica el heat contra una
+reconstrucción independiente en cada una de esas fechas, y eso es verdadero o
+falso con total independencia de si los gaps son realistas.
+
+Lo que el fixture **no** puede sostener es ninguna afirmación sobre frecuencias:
+no dice cada cuánto pasa una mañana así, ni con qué probabilidad, ni cuánto
+riesgo de gap tiene una cartera de verdad. Un parámetro calibrado hasta que
+aparezca el escenario que uno quiere ver no mide con qué frecuencia aparece el
+escenario. Si algún día alguien quiere ese número, sale de datos reales y de
+ningún otro lado.
+
 **Por qué el segundo uso no se arregla con más datos sintéticos.** No es un
 problema de muestra chica. Las capas de salida explotan estructura del precio —
 retrocesos, persistencia, cuánto dura un movimiento antes de darse vuelta— y en

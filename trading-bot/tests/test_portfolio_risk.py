@@ -233,6 +233,72 @@ def test_el_heat_ata_y_los_rechazos_quedan_registrados(universo):
     assert exceso < 0.5, f"el heat se fue {exceso:.2f} puntos arriba del tope"
 
 
+def test_el_fixture_genera_demanda_de_heat_muy_por_encima_del_tope(universo):
+    """Que el heat no se pase del 4% tiene que ser mérito del control, no del fixture.
+
+    Sin esto, "heat máximo 3.93% contra un tope de 4.00%" se puede leer de dos
+    maneras opuestas: que el control frenó justo a tiempo, o que las señales
+    simultáneas son tan raras acá que el 4% nunca estuvo en juego. Son lecturas
+    distintas y la segunda haría que el test de arriba no probara nada.
+
+    Medido sobre el universo correlacionado SIN ningún control de cartera: el heat
+    llega al 5.03%, pasa el 4% en 79 de los 890 días con posición, y hay días con
+    hasta 7 posiciones abiertas a la vez. La demanda existe y sobra.
+    """
+    sin_control = run_backtest(estrategia(), universo, groups=etiquetas(universo))
+    heat = sin_control.portfolio_heat * 100
+    con_posicion = int((heat > 0).sum())
+
+    assert heat.max() > TOPE_HEAT * 1.25, (
+        f"sin control el heat llega a {heat.max():.2f}%, apenas por encima del tope "
+        f"de {TOPE_HEAT}%: el margen del test del tope sería del fixture y no del control"
+    )
+    assert (heat > TOPE_HEAT).sum() >= 50, (
+        f"el heat solo pasa el tope en {(heat > TOPE_HEAT).sum()} de {con_posicion} "
+        "días con posición: demasiado raro para que el control se ejercite"
+    )
+    simultaneas = max(len(v) for v in abiertas_al_cierre(sin_control).values())
+    assert simultaneas >= 6, f"nunca hubo más de {simultaneas} posiciones a la vez"
+
+
+@pytest.mark.parametrize("tope", [3.0, 2.0, 1.0])
+def test_el_heat_sigue_atando_con_topes_mucho_mas_exigentes(universo, tope):
+    """El control empujado a fondo, que da más confianza que el 98% del tope de 4%.
+
+    Con el tope al 4% el heat realizado llega al 98% del tope y eso se puede leer
+    como "apenas activo". Bajándolo a 3%, 2% y 1% el control pasa a rechazar 54,
+    75 y 94 señales (contra 20 al 4%) y la cantidad de trades cae de 106 a 68, 47
+    y 28. En los tres el invariante se mantiene: el heat realizado **nunca** se va
+    más de medio punto arriba del tope, que es el margen ex ante ya documentado.
+
+    Es el mismo control, la misma aritmética y tres órdenes de exigencia: si el
+    3.93% del test de arriba fuera casualidad del fixture, acá se rompería.
+    """
+    grupos = etiquetas(universo)
+    sin_tope = run_backtest(estrategia(), universo, groups=grupos)
+    con_tope = run_backtest(
+        estrategia(max_portfolio_heat_r=tope), universo, groups=grupos
+    )
+
+    rechazos = [
+        r for r in con_tope.rejections if r.reason.startswith(portfolio_risk.MOTIVO_HEAT)
+    ]
+    assert len(rechazos) > 40, (
+        f"con el tope al {tope}% solo hubo {len(rechazos)} rechazos por heat"
+    )
+    assert len(con_tope.trades) < len(sin_tope.trades)
+
+    # el invariante, que es lo que el test prueba de verdad
+    exceso = con_tope.portfolio_heat.max() * 100 - tope
+    assert exceso < 0.5, (
+        f"con el tope al {tope}% el heat realizado llegó a "
+        f"{con_tope.portfolio_heat.max() * 100:.2f}%, {exceso:.2f} puntos arriba"
+    )
+
+    # y aprieta de verdad: cuanto más bajo el tope, menos trades entran
+    assert len(con_tope.trades) <= len(sin_tope.trades) * 0.7
+
+
 def test_el_heat_del_motor_es_el_que_sale_de_recalcularlo_a_mano(universo):
     """Contra una reconstrucción independiente, en todas las velas del período.
 
@@ -262,6 +328,18 @@ def test_gaps_correlacionados_saltan_varios_stops_la_misma_manana(universo):
     correlación (que es lo que hace que los huecos se abran juntos), gaps 16 veces
     más volátiles y stops de 0.75×ATR. No es una predicción de nada: es la mañana
     mala construida a propósito para ver si el control la aguanta.
+
+    **Este fixture prueba mecánica, no realismo**, y hay que decirlo con todas las
+    letras porque los dos parámetros —``gap_volatility=0.05`` y el multiplicador
+    0.75— **se eligieron contra el resultado deseado**: se subieron hasta que
+    aparecieran 5 mañanas con 2+ stops simultáneos. Para la pregunta que el test
+    hace (¿el heat se recalcula bien después de varios stops la misma mañana?) eso
+    es legítimo: el invariante es verdadero o falso sin importar si los gaps son
+    realistas, y sin la mañana no se ejercita nunca. Lo que el fixture NO sostiene
+    es ninguna afirmación sobre **frecuencias**: no dice cada cuánto pasa una
+    mañana así ni cuánto riesgo de gap tiene una cartera de verdad. Un parámetro
+    calibrado hasta que aparezca el escenario no mide con qué frecuencia aparece.
+    Está en ESTADO.md sección 2, al lado de la tabla motor/aporta.
     """
     frames = {
         s: validate_ohlcv(df, s)
