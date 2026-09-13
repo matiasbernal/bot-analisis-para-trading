@@ -529,8 +529,10 @@ período, no las capas.
    para elegirlos y el *k+1* para medirlos, sin volver atrás — walk-forward de verdad.
 3. **El out-of-sample se gasta una sola vez**, al final del torneo, sobre la configuración
    ganadora completa. No hay una mirada por capa. Si el out-of-sample contradice al
-   in-sample, se reporta y se vuelve a la línea base de dos capas; no se reabre el torneo
-   sobre el mismo tramo, porque ahí ya dejaría de ser out-of-sample.
+   in-sample, se reporta y se vuelve a la línea base (hard stop + take profit); no se reabre
+   el torneo sobre el mismo tramo, porque ahí ya dejaría de ser out-of-sample. Qué cuenta
+   como "contradice" y qué no, en "El criterio, fijado antes de que existan los datos" §2.3:
+   no alcanza con que el out-of-sample no dé significativo.
 4. La cantidad de tramos está acotada por el poder: un tramo con cinco trades no decide
    nada. El número de tramos sale del cálculo de poder, no de partir el calendario en
    pedazos iguales.
@@ -546,6 +548,176 @@ período, no las capas.
   cada trade igual, y si quedan menos trades y cada uno arriesga lo mismo, el capital rinde
   menos con mejor número por trade. Las dos métricas se miran juntas o no se mira ninguna.
 
+#### El criterio, fijado antes de que existan los datos
+
+*(Escrito el 2026-09-13, con los CSV reales todavía sin bajar. **Esa es la razón de que esté
+escrito ahora y no después**, y es la misma por la que se reserva el out-of-sample: un
+criterio definido con los datos a la vista se acomoda a lo que los datos dicen, y el que lo
+acomoda no se da cuenta. Lo de abajo son reglas, no intenciones: cada una tiene que poder
+ejecutarse leyendo una salida del banco sin volver a discutir nada.)*
+
+Hasta acá el PLAN decía "se queda si mejora la expectancy" y eso no alcanza para ejecutar:
+no dice con qué intervalo, ni qué pasa con un empate, ni qué hace una capa que no se puede
+medir, ni cuántas veces se puede mirar el out-of-sample. Las cuatro cosas, en orden.
+
+##### Los cinco estados en los que puede terminar una capa
+
+El vocabulario primero, porque la mitad de las reglas son sobre la diferencia entre dos de
+estos estados y esa diferencia se pierde si las dos se escriben "apagada":
+
+| estado | qué pasó | ¿vuelve? |
+|---|---|---|
+| **GANADORA** | se midió y ganó según 2.1 | queda prendida en la configuración |
+| **RECHAZADA** | se midió y no ganó (empate o peor) | solo en la pasada final, con el umbral de 2.4 |
+| **NO EVALUADA** | no se midió: su exigencia superaba el corte de 2.2 | sí, sola, el día que haya *n* suficiente |
+| **NO ESTIMABLE** | ni siquiera se pudo calcular la exigencia | cuando exista lo que falta (`reversal`: la capa escrita) |
+| **PENDIENTE** | bloqueada por el entorno (`event_risk`: red) | como pasada de reevaluación, cuando haya red |
+
+**La diferencia entre RECHAZADA y NO EVALUADA es la que más importa y la más fácil de
+perder.** Una capa rechazada se midió y perdió: la evidencia existe y apunta en contra. Una
+capa no evaluada no tiene evidencia de ninguna clase; lo que falló fue el instrumento, no la
+capa. Escribir las dos como "apagada por defecto" convierte una falta de datos en un
+veredicto, que es exactamente lo que el módulo de poder existe para no hacer.
+
+##### 2.1 Qué hace falta para declarar una capa GANADORA
+
+Se mide con el banco A/B pareado por trade (`tradingbot comparar`), **dentro del in-sample**,
+contra la configuración vigente en ese punto del orden. Las cuatro condiciones son
+conjuntas: falta una y la capa es RECHAZADA.
+
+1. **El intervalo, y no el punto.** El delta pareado de expectancy tiene que dar un intervalo
+   de confianza del 95% por bootstrap **enteramente por encima de cero** — o sea, cota
+   inferior > 0. Un punto estimado positivo con el cero adentro es un empate, y un empate no
+   entra (primera regla de desempate). Esto es lo que faltaba: `+0.18R` no dice nada sin su
+   intervalo, y `+0.18R [−0.61, +0.95]` dice que no se sabe.
+2. **El mismo signo en todos los tramos.** El punto estimado tiene que tener el mismo signo
+   en cada tramo del walk-forward, no solo en el agregado. Una mejora que vive entera en un
+   tramo es un régimen de mercado y no una capa. Esto no pide significancia por tramo —no la
+   va a haber— pide consistencia de signo.
+3. **Y el piso de cuenta.** Al menos `MIN_AFECTADOS` = 10 trades efectivamente tocados por la
+   capa. Es el mismo piso de la regla del cociente inestable: una media de menos de diez
+   números le pasa su varianza al resultado. Con menos de diez, la capa es NO EVALUADA y no
+   RECHAZADA, porque lo que falló fue la muestra.
+4. **El segundo par de ojos, cuando la capa cuesta trades.** Si la configuración candidata
+   toma **menos trades** que la vigente —porque bloquea entradas, o porque salir antes cambia
+   qué señales entran por cash y por heat—, la expectancy sola no alcanza: `return_on_risk`
+   tiene que ser **mayor o igual** que el de la configuración vigente, y el heat máximo no
+   puede subir. Si la expectancy mejora y `return_on_risk` empeora, es empate y la capa no
+   entra. No hay umbral que calibrar acá a propósito: **cualquier** pérdida de trades activa
+   el segundo par de ojos, porque un umbral sería un parámetro más que elegir mirando los
+   datos. (Y hay una razón técnica: los trades que existen en un brazo y no en el otro no
+   tienen par, así que el bootstrap pareado no los ve. La condición 4 es lo único que los
+   mira.)
+
+**Empate explícito.** Si el intervalo contiene el cero, el veredicto es RECHAZADA con el
+intervalo publicado al lado, no "no concluyente". Con el poder ya publicado por capa antes de
+la corrida, un empate en una capa medible **sí** es información: significa que el efecto, si
+existe, es menor que su MDE.
+
+##### 2.2 Qué hace falta para declarar una capa NO EVALUADA, y qué pasa entonces
+
+Hoy el corte de ~1/3 vive implícito en los veredictos que imprime `poder.py`. Explícito:
+
+> **Una capa cuya exigencia supera 1/3 no entra al torneo.** Queda apagada, registrada como
+> **NO EVALUADA** con su exigencia, su *n* y la configuración contra la que se calculó.
+
+La exigencia es `MDE por trade afectado / efecto disponible`: qué fracción del **mejor caso**
+tiene que capturar la capa, en cada trade que toca, para distinguirse de un empate. El corte
+en 1/3 es un juicio y se declara como tal: ninguna capa real captura su mejor caso —un
+chandelier devuelve 3 ATR antes de sacarte, un break-even sale exactamente en cero cuando el
+trade habría vuelto—, así que pedirle más de un tercio es pedirle un milagro y después leer
+el empate como "no aporta". **El número queda fijado ahora, con los datos sin bajar.** Se
+puede mover, pero solo con un argumento que no mencione el resultado de ninguna corrida; un
+1/3 que se convierte en 1/2 después de ver que una capa quedó afuera no es una calibración,
+es la conclusión eligiendo su premisa.
+
+Cuatro consecuencias operativas:
+
+- **La exigencia se recalcula en el turno de cada capa**, contra la configuración vigente en
+  ese momento, no contra la línea base inicial. Es el mismo hecho que hizo caer al trailing:
+  cada capa que entra baja el efecto disponible de las que siguen, así que una capa puede
+  ser medible al empezar el torneo y no serlo cuando le toca. Eso no es un error del torneo,
+  es lo que el torneo mide, y va registrado con el orden.
+- **NO EVALUADA no es un final.** La capa vuelve sola cuando el universo crezca lo suficiente
+  para que su exigencia caiga bajo el corte, y el propio informe publica cuánto falta:
+  `poder.trades_necesarios` da los trades y `universo.py` los traduce a símbolo-años.
+- **No se toca `α` ni la potencia para que una capa entre.** Bajar la potencia al 60% baja el
+  MDE y "hace medible" a cualquier capa: lo que compra es más falsos negativos disfrazados de
+  medición. α = 5% y potencia = 80% quedan fijos para todo el torneo.
+- **Y el torneo puede quedarse sin capas.** Si ninguna pasa el corte, el resultado del torneo
+  es la línea base, con las cinco fichas de NO EVALUADA al lado y el *n* que haría falta. Eso
+  es un resultado y se publica como tal; no es motivo para bajar el corte.
+
+##### 2.3 El out-of-sample: cuántas veces, qué es una contradicción y cuál gana
+
+**Cuántas veces: una.** Una corrida, sobre la configuración ganadora completa, al final del
+torneo. "Una" es literal y mecánico: si la corrida se rompe, o los datos estaban mal, o se
+quiere repetir con un detalle cambiado, **eso es una segunda mirada** y se registra como tal
+en el manifiesto. El contador de miradas al out-of-sample va en el manifiesto de la corrida,
+no en la memoria de nadie.
+
+**Antes de gastarlo se publica su poder.** El tramo out-of-sample tiene su propio *n* y por
+lo tanto su propia exigencia. Si con ese *n* la configuración ganadora no se puede distinguir
+de la línea base ni capturando todo su efecto disponible, **el out-of-sample no puede
+contradecir nada** y hay que decirlo antes de mirarlo: gastarlo igual es gastarlo para
+enterarse de que no alcanzaba. En ese caso la salida correcta es no correrlo y reportar la
+configuración como validada solo in-sample.
+
+**Qué es una contradicción**, definido sobre el mismo estadístico del torneo (delta pareado
+de la configuración ganadora contra la línea base, ahora sobre el tramo reservado):
+
+| resultado OOS | definición | qué se hace |
+|---|---|---|
+| **CONFIRMA** | mismo signo que el in-sample, y el intervalo del 95% contiene el punto estimado in-sample | la configuración queda |
+| **DEGRADA** | mismo signo, pero el intervalo excluye el punto estimado in-sample | la configuración queda, y el informe publica la degradación con los dos números. No se re-ajusta nada |
+| **NO CONCLUYE** | el intervalo contiene al cero y al punto in-sample | la configuración queda, marcada como validada solo in-sample. Es el resultado **esperable** con un tramo chico, no una sorpresa |
+| **CONTRADICE** | **signo opuesto** al in-sample **y** el intervalo excluye el punto estimado in-sample | se vuelve a la línea base |
+
+La definición estricta es deliberada: un out-of-sample que no alcanza significancia **no**
+contradice nada, porque eso es lo que pasa cuando no hay poder, y tratarlo como contradicción
+haría que el tramo reservado tumbe cualquier resultado por falta de datos.
+
+**Cuál gana: el out-of-sample, y gana restando y no sustituyendo.** Una contradicción no
+convierte a la configuración opuesta en ganadora: devuelve todo a la línea base (hard stop +
+take profit) y deja el torneo sin resultado. La razón es la que hace que el tramo valga algo:
+se lo miró **una** vez, así que puede decir "no", que es una decisión binaria sobre una
+hipótesis fijada de antemano, pero no puede **elegir** entre configuraciones — elegir es
+mirar varias veces con otro nombre. Después de una contradicción el torneo no se reabre sobre
+el mismo tramo; lo que se puede hacer es conseguir más datos y correr un torneo nuevo con un
+tramo out-of-sample nuevo, con el anterior marcado como gastado.
+
+##### 2.4 La pasada final: con qué criterio entra una capa que ya perdió
+
+La pasada final ya estaba escrita —las RECHAZADAS se vuelven a medir contra la configuración
+ganadora— y le faltaba lo principal: **con qué umbral**. Si es el mismo de 2.1, el orden deja
+de importar y el torneo se vuelve circular; además cada capa pasaría a tener dos oportunidades
+con α = 5% cada una, que es la multiplicidad que este PLAN entero existe para no pagar.
+
+> **En la pasada *k*, una capa entra solo si su intervalo por bootstrap al nivel
+> `1 − α/k` queda enteramente por encima de cero.** Primera medición (el torneo): 95%.
+> Segunda (la primera pasada final): 97.5%. Tercera: 98.3%. Y así.
+
+Es la corrección de multiplicidad que corresponde a haberla medido *k* veces, y tiene una
+propiedad que resuelve el otro problema: **se aprieta sola**, así que la pasada no puede
+ciclar. Las tres reglas que la acompañan:
+
+- **Tope duro de tres mediciones.** Una capa medida tres veces sin entrar queda RECHAZADA y
+  cerrada para este torneo. Vuelve al siguiente, con más datos.
+- **La pasada final solo suma, nunca saca.** Una capa que ya ganó no se re-mide para sacarla:
+  eso sería re-decidirla contra una línea base posterior, o sea reabrir el torneo. Si al final
+  dos capas se pisan —el caso `giveback` contra `trailing_stop`—, el informe **publica** la
+  redundancia con su número y no la resuelve; se resuelve en el torneo siguiente. La única
+  excepción es la capa que en la configuración final **dispara en cero trades**: eso no es una
+  medición sino una observación, y se apaga por código muerto.
+- **Las NO EVALUADAS no participan de la pasada final.** No perdieron nada que re-medir, y la
+  configuración ganadora tiene *menos* efecto disponible que la línea base, así que su
+  exigencia solo puede haber empeorado. Lo que las trae de vuelta son datos, no pasadas.
+
+**Y todo esto se registra o no vale**: el orden usado, el estado final de cada capa, el
+intervalo y el α de cada medición, la cantidad de veces que se midió cada una, y el contador
+de miradas al out-of-sample. Un resultado de torneo sin eso no es reproducible, que es la
+regla de rigor 7 aplicada a una decisión en vez de a una corrida.
+
 #### El torneo depende del orden, y hay que decirlo
 
 Las capas interactúan, así que el resultado **no es una propiedad de la capa sino del par
@@ -560,12 +732,14 @@ Dos consecuencias, las dos obligatorias:
 - El orden del torneo se elige por costo de instrumento (de menos grados de libertad a más,
   para gastar el in-sample en las decisiones baratas primero) y **queda registrado junto al
   resultado**. Un resultado de torneo sin su orden no es reproducible.
-- **Pasada final de reevaluación.** Cuando el torneo termina, las capas que quedaron afuera
-  se vuelven a medir **contra la configuración ganadora**, no contra la línea base. Una capa
+- **Pasada final de reevaluación.** Cuando el torneo termina, las capas **RECHAZADAS** se
+  vuelven a medir **contra la configuración ganadora**, no contra la línea base. Una capa
   puede no aportar sobre dos capas y sí sobre cinco: `break_even` descartado solo puede
   tener sentido una vez que `time_stop` cambió la distribución de trades que llegan vivos a
   +1R. Si alguna entra en esta pasada, la pasada se repite con la configuración nueva, hasta
-  que ninguna entre.
+  que ninguna entre. **Con qué umbral entra ahí, que no es el mismo del torneo**, y por qué
+  las NO EVALUADAS no participan: §2.4 de "El criterio, fijado antes de que existan los
+  datos".
 
 #### El poder de medición es uno por capa, no uno global
 
@@ -582,6 +756,12 @@ expectancy global, y el margen que esa capa tiene disponible (cuánta R hay real
 juego, de MAE/MFE). Una capa cuyo MDE supera su margen disponible **no se mide**: se declara
 no medible con este universo y este período, y eso se dice en vez de reportar un empate como
 si fuera información.
+
+Ese flag binario es **condición necesaria y nada más**, y el criterio que decide de verdad es
+la exigencia con el corte en 1/3 de §2.2: el efecto disponible es el mejor caso de la capa, y
+ninguna capa real lo captura entero. Una capa que pasa el flag con una exigencia del 70% no
+es medible, es una capa a la que se le va a pedir un milagro y después se va a leer el empate
+como "no aporta".
 
 #### `event_risk` y la red
 
