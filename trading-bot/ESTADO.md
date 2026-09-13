@@ -213,6 +213,50 @@ Contar "cuatro posiciones de 1R" daría 4R nominales que en la práctica eran
 dice. Lo mismo vale para cualquier lectura tipo "cinco pérdidas seguidas son
 −5R": por eso el informe publica el costo de la peor racha **en plata**.
 
+### Cómo quedó implementado, al hacer la 2B
+
+Cinco decisiones que el plan no fijaba y que conviene no re-discutir a ciegas.
+Todas están en `strategy/portfolio_risk.py` con su motivo al lado del código:
+
+- **El ancla del riesgo es el precio de entrada, no el cierre de hoy.** El
+  riesgo de una posición abierta es `acciones × (entrada − stop)`, que es la
+  fórmula del PLAN. La alternativa —`(cierre de hoy − stop)`— también es
+  defendible, pero haría que el heat subiera solo porque el precio subió, sin
+  que nadie hubiera tomado más riesgo, y `max_portfolio_heat_r` dejaría de
+  significar lo mismo el día 1 que el día 20.
+- **Se suma la parte positiva de cada posición, no la suma con signo.** Una
+  posición con el stop arriba de la entrada (trailing ya armado, o el break-even
+  de la 2C) aporta **cero**, no negativo. Aportar negativo dejaría que dos
+  trades cubiertos "paguen" la apertura de un tercero expuesto.
+- **Las órdenes pendientes cuentan.** Si no contaran, cinco señales de la misma
+  noche pasarían las cinco —ninguna ve a las otras— y el heat se enteraría al día
+  siguiente, con las cinco adentro.
+- **El control es EX ANTE.** Se aplica cuando llega la señal, contra la equity de
+  ese cierre. Si después la equity cae, el mismo riesgo abierto pesa más y el heat
+  realizado puede quedar unas décimas arriba del tope: medido sobre el universo
+  correlacionado, 4.09% contra un tope de 4.00%. **No es un incumplimiento**;
+  bajarlo pediría recortar posiciones ya abiertas, que es otra decisión y no está
+  en el plan. El informe lo explica cuando pasa.
+- **El heat no se lleva en un contador.** Se recalcula desde las posiciones vivas
+  en cada consulta. Un acumulador incremental se desincroniza el día que varios
+  stops saltan la misma mañana —justo el escenario para el que existe el
+  control— y el error no se ve, porque el número sigue siendo plausible. Hay un
+  test que compara el heat del motor contra una reconstrucción independiente en
+  **todas** las velas del período: coinciden a 1e-17.
+
+Y dos decisiones sobre los cortacircuitos:
+
+- **El mensual es un latch dentro del mes**: una vez que saltó no se levanta
+  porque la equity repunte, solo al cambiar el mes. La regla es dejar de operar el
+  mes malo, no operar en los repuntes del mes malo.
+- **El del pico no se reanuda solo.** −15% desde el máximo no es una racha, es la
+  sospecha de que el método o el mercado cambiaron; reanudar automáticamente lo
+  convertiría en una pausa. En el backtest eso significa que no se abre nada más
+  en lo que queda del período, y el informe lo registra con su motivo.
+- Los dos se evalúan **antes** de mirar las entradas de esa misma vela, no después
+  de la marca: si se evaluaran después, el freno regiría recién al día siguiente y
+  esta noche saldría una orden más.
+
 ---
 
 ## 6. El formato de alerta decidido (Fase 4, sin implementar)
@@ -336,31 +380,57 @@ dos tests que los usan se saltean.
 
 ---
 
-## 9. Qué números del informe cambiaron respecto de la tanda 1
+## 9. Qué números del informe cambiaron, calibración por calibración
 
 La plantilla `ema_cross` declara su calibración en el YAML y el informe la imprime
 en el encabezado, justamente para que dos informes de la misma estrategia no se
-confundan. **v1 = `max_position_pct: 20`; v2 = `30`.** Sobre el mismo fixture:
+confundan. **v1 = `max_position_pct: 20`; v2 = `30`; v3 = v2 + trailing
+chandelier.** Sobre el mismo fixture:
 
-| | v1 (tope 20) | v2 (tope 30) |
-|---|---|---|
-| Equity final | $10.486 | $10.681 |
-| CAGR | 1.00% | 1.39% |
-| Max drawdown | −4.96% | −5.51% |
-| Duración de ese DD | 957 d | 371 d |
-| DD más largo | 957 d | 385 d |
-| In-sample CAGR | −0.17% | +0.18% |
-| Out-of-sample CAGR | 2.82% | 3.26% |
-| Expectancy | +0.25R | +0.25R |
-| Expectancy en plata | $+17.27 | $+24.51 |
-| 1R realizado promedio | $78.53 | $95.89 |
-| Error de la lectura ingenua | 45% | 3% |
+| | v1 (tope 20) | v2 (tope 30) | v3 (+ trailing) |
+|---|---|---|---|
+| Equity final | $10.486 | $10.681 | $9.966 |
+| CAGR | 1.00% | 1.39% | −0.07% |
+| Max drawdown | −4.96% | −5.51% | −5.82% |
+| Duración de ese DD | 957 d | 371 d | 556 d |
+| DD más largo | 957 d | 385 d | 556 d |
+| In-sample CAGR | −0.17% | +0.18% | −1.30% |
+| Out-of-sample CAGR | 2.82% | 3.26% | +1.82% |
+| Expectancy | +0.25R | +0.25R | +0.04R |
+| Expectancy en plata | $+17.27 | $+24.51 | $+0.67 |
+| 1R realizado promedio | $78.53 | $95.89 | $91.41 |
+| Error de la lectura ingenua | 45% | 3% | — (la expectancy en plata es ~0) |
+| Días con posición | — | 47.68% | 28.00% |
 
-Todo es consecuencia del mismo cambio: posiciones más grandes ganan y pierden
-más. El drawdown más profundo empeora (−4.96% → −5.51%) y a la vez dura mucho
-menos, y eso tiene una explicación verificada a mano: **no es el mismo drawdown
-más corto, es un episodio largo que se parte en dos** porque la equity ahora sí
-recupera su máximo en el medio.
+**Sobre la columna v3 hay que ser muy claro: NO dice que el trailing sea malo.**
+Dice tres cosas y ninguna es esa:
+
+1. El banco A/B, corrido entre las dos plantillas, da un **empate**:
+   `delta pareado −0.215R [−0.612, +0.152] p=0.282`, con f = 0.567 (17 de 30
+   trades cambiados). El intervalo contiene el cero con holgura por los dos lados.
+2. Ese empate es lo que había que esperar: el MDE con f = 0.57 y 30 trades es de
+   ~0.98R por trade afectado, y el efecto observado es 0.38R. **La corrida no
+   tiene poder para distinguir −0.2R de 0.** Que el punto estimado sea negativo
+   no es evidencia de nada.
+3. Y aunque tuviera poder, seguiría sin decir nada sobre el trailing **como
+   regla**, porque estas son series sintéticas: un chandelier explota
+   retrocesos y persistencia, y en un random walk esa estructura la define el
+   generador (sección 2).
+
+Por eso el trailing entra igual, por decisión de diseño del PLAN, y por eso el
+informe imprime el aviso donde aparece. La bajada de "días con posición" de 47.68%
+a 28.00% sí es un hecho del motor y no una opinión: el trailing corta los trades
+antes, y eso libera capital, que es lo que la 2B pasa a administrar.
+
+Un dato lateral que vale la pena: el σ del efecto **medido por el banco** dio
+1.44R contra el 1.43R que `poder.py` estimaba a priori con `FACTOR_SIGMA`. La
+calibración de la 2A resultó buena; sigue siendo una calibración.
+
+De v1 a v2 todo es consecuencia del mismo cambio: posiciones más grandes ganan y
+pierden más. El drawdown más profundo empeora (−4.96% → −5.51%) y a la vez dura
+mucho menos, y eso tiene una explicación verificada a mano: **no es el mismo
+drawdown más corto, es un episodio largo que se parte en dos** porque la equity
+ahora sí recupera su máximo en el medio.
 
 ```
 v1: pico 2018-11-02 ($10.071,07) → valle 2020-07-14 ($9.571,29) → recupera 2021-06-16   = 957 d

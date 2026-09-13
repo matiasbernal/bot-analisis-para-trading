@@ -4,8 +4,12 @@ Herramienta para analizar momentos de entrada y salida con parámetros propios, 
 para **validar esos parámetros contra datos históricos antes de arriesgar plata**.
 No ejecuta órdenes: analiza, avisa y mide.
 
-El diseño completo está en [`PLAN.md`](PLAN.md). Esto es la **tanda 1** (Fases 0,
-1 y 2): la capa de datos, los indicadores y un motor de backtest validado.
+El diseño completo está en [`PLAN.md`](PLAN.md). Hoy están la tanda 1 (Fases 0, 1
+y 2: datos, indicadores y un motor de backtest validado) y las tandas **2A** —
+estado de la posición, banco A/B, poder de medición por capa y trailing
+chandelier— y **2B** — riesgo de cartera. Falta la **2C**, el torneo de capas,
+que está parada esperando datos reales por el motivo de
+[`ESTADO.md`](ESTADO.md) sección 2, no por falta de código.
 
 > **¿Llegás sin contexto?** [`ESTADO.md`](ESTADO.md) cuenta dónde está el
 > proyecto, qué se decidió después de cerrar la tanda 1 y **por qué** cada cosa
@@ -13,14 +17,21 @@ El diseño completo está en [`PLAN.md`](PLAN.md). Esto es la **tanda 1** (Fases
 
 ## Qué hay y qué no
 
-| Funciona hoy | Llega en la tanda 2 |
+| Funciona hoy | Llega después |
 |---|---|
-| Datos: Yahoo, Stooq, CSV locales, cache parquet, validación | Earnings, régimen de mercado |
+| Datos: Yahoo, Stooq, CSV locales, cache parquet, validación | Earnings, régimen de mercado (2C) |
 | Indicadores: SMA, EMA, RSI, MACD, ATR, Bollinger, ADX | Estocástico, ROC, OBV, donchian |
 | Reglas por YAML: 11 operadores, composición `all`/`any`/`not` | Filtros de entrada (liquidez, earnings) |
-| Salidas: **hard stop** y **take profit** | Trailing, break-even, reversión, giveback, time stop |
-| Riesgo por trade: sizing por 1R, tope de concentración | Riesgo de cartera: heat, grupos, cortacircuito |
+| Salidas: **hard stop**, **trailing chandelier** y **take profit** | Break-even, reversión, giveback, time stop (2C) |
+| Riesgo por trade: sizing por 1R, tope de concentración | |
+| **Riesgo de cartera**: heat en pesos, límite por grupo, dos cortacircuitos | |
+| Banco A/B con bootstrap pareado y poder de medición por capa | El torneo que los usa (2C) |
 | Backtest con costos, métricas, benchmark, manifiesto | `scan`, journal, Telegram, web, optimización |
+
+> **El trailing está prendido por diseño, no porque se haya medido que aporta.**
+> El PLAN lo declara línea base de las plantillas, así que no compite en el
+> torneo. Con los datos que hay, el poder de medición no alcanza para afirmar
+> que suma ni que resta, y el informe lo dice cada vez que el trailing aparece.
 
 ## Instalar
 
@@ -55,6 +66,17 @@ Sobre datos reales (necesita internet; copiá `config/settings.example.yaml` a
 
 ```bash
 tradingbot backtest --strategy config/strategies/ema_cross.yaml --symbol SPY
+```
+
+Comparar dos configuraciones sobre los mismos datos (el banco A/B del torneo de
+capas: empareja los trades por símbolo y fecha de entrada y devuelve el delta
+**con su incertidumbre**, que es lo que convierte "mejora la expectancy" en una
+medición):
+
+```bash
+tradingbot comparar --base config/strategies/ema_cross_sin_trailing.yaml \
+                    --variante config/strategies/ema_cross.yaml \
+                    --data tests/fixtures/synthetic
 ```
 
 Opciones: `--symbol` restringe el universo, `--offline` usa solo el cache,
@@ -265,6 +287,125 @@ vuelva a atar (cuenta más chica, papeles más caros, stops más ajustados,
 `risk_pct` más alto). `test_riesgo_realizado.py` fija las dos mediciones para que
 se note si reaparece.
 
+## El trailing chandelier — qué hace y qué NO se puede concluir de él
+
+El stop sigue al **máximo alcanzado desde la entrada**, a `multiple × ATR` por
+debajo, y no se activa hasta que el trade avanzó `activate_after_r`:
+
+```yaml
+exits:
+  hard_stop:   {mode: atr, multiple: 2.0, atr_period: 14}
+  trailing_stop:
+    mode:             chandelier
+    multiple:         3.0
+    atr_period:       14
+    activate_after_r: 1.0   # no se mueve nada hasta que el trade va +1R
+```
+
+Tres cosas del funcionamiento que conviene saber antes de leer un informe:
+
+- **El nivel se recalcula al cierre de cada vela y rige desde la siguiente.**
+  Mover el stop con el máximo de la vela `t` y después compararlo contra el mínimo
+  de esa misma vela `t` sería mirar adentro de la barra. El precio de hacerlo bien
+  es que el trailing llega un día tarde, y es el mismo precio que paga toda la
+  ejecución del motor.
+- **El stop nunca baja.** El único camino para moverlo es `raise_stop`, que
+  rechaza cualquier nivel peor que el vigente. Importa porque el chandelier *sí*
+  propone bajar cuando el ATR se agranda, que es justo cuando el trade se está
+  dando vuelta.
+- **La salida lleva su propio motivo.** `trailing_stop` cuando el mínimo lo toca y
+  `gap_trailing_stop` cuando la vela abre por debajo (con fill en la apertura,
+  igual que el hard stop). Sin esa distinción la atribución le cargaría al hard
+  stop salidas que decidió el trailing, y la pregunta "¿qué regla me saca?"
+  quedaría sin respuesta.
+
+**Y lo que no se puede concluir.** El trailing entra **por decisión de diseño del
+PLAN** —"las plantillas arrancan con dos capas prendidas, hard stop + trailing"—
+y no porque se haya medido que aporta. El banco A/B, corrido entre las dos
+plantillas sobre el fixture, da un empate:
+
+```
+tradingbot comparar -b config/strategies/ema_cross_sin_trailing.yaml                     -v config/strategies/ema_cross.yaml                     -d tests/fixtures/synthetic
+
+  trades afectados  17 de 30 pares   ->  f = 0.567
+  expectancy        +0.251R -> +0.036R
+  delta pareado     -0.215 [-0.612, +0.152] p=0.282 n=30
+```
+
+Ese intervalo contiene el cero con holgura por los dos lados, y era esperable: el
+mínimo detectable con f = 0.57 y 30 trades es ~0.98R por trade afectado. **La
+corrida no tiene poder para distinguir −0.2R de 0**, así que el signo negativo del
+punto estimado no es evidencia de nada. Y aunque lo tuviera, seguiría sin decir
+nada sobre el trailing como regla, porque son series sintéticas
+([`ESTADO.md`](ESTADO.md), sección 2).
+
+Por eso el informe imprime el aviso donde el trailing aparece —en la tabla de
+atribución, en el bloque de poder y en la lista de advertencias— y la CLI aclara,
+abajo del veredicto del banco, que un empate **no** apaga una capa que no compite.
+
+## Riesgo de cartera — los cinco controles
+
+Un trader con veinte años no piensa en "este trade": piensa en cuánto tiene
+expuesto en total y cuándo tiene que dejar de operar.
+
+```yaml
+risk:
+  position_sizing:    {mode: risk_pct, risk_pct: 1.0, on: current_equity}
+  max_position_pct:   30       # concentración, por trade
+  max_open_positions: 10
+
+  max_portfolio_heat_r: 4.0            # 4% del equity en riesgo abierto
+  max_per_group:        {sector: 2}    # etiquetas de config/universe.yaml
+  circuit_breaker:
+    monthly_drawdown_pct: 6.0          # el mes va -6%: se deja de abrir
+    peak_drawdown_pct:    15.0         # -15% del máximo: se cierra todo y se para
+```
+
+**No son candidatos del torneo, son restricciones**: no se miden con el banco A/B
+ni se les calcula poder, se cumplen o no se cumplen. Por eso avanzaron sin esperar
+datos reales.
+
+- **El heat va en pesos.** `Σ(acciones × distancia al stop) / equity`, y `4.0` se
+  lee como *4% del equity en riesgo abierto*, no como cuatro posiciones de 1R
+  nominal (que en la práctica son ~3.1R). Una posición cuyo stop ya pasó arriba
+  de la entrada aporta **cero**, no negativo. Detalle y motivos en
+  [`ESTADO.md`](ESTADO.md), sección 5.
+- **El límite por grupo lee las etiquetas de `config/universe.yaml`**, no del YAML
+  de estrategia: el sector es del papel, no de la estrategia. Un símbolo del
+  universo sin la etiqueta que pide `max_per_group` **hace fallar el backtest al
+  arrancar**, en vez de caer en un cajón "otros" que sería un grupo más con su
+  propio cupo.
+- **Los dos cortacircuitos se evalúan antes de mirar las entradas de esa misma
+  vela.** Si se evaluaran después del cierre, el freno regiría recién al día
+  siguiente y esa noche saldría una orden más.
+
+### Los rechazos se cuentan y se publican
+
+El PLAN pide que el backtest refleje **las señales que realmente habrías podido
+tomar**, no todas las que aparecieron. El informe trae la tabla:
+
+```
+tradingbot backtest -s config/strategies/cartera_correlacionada.yaml                     -d tests/fixtures/correlated
+
+Señales rechazadas: 17
+Categoría                 Señales     %   Qué la produjo
+heat de cartera                 4   24%   el riesgo abierto más el de la señal pasaba max_portfolio_heat_r
+límite por grupo               10   59%   ya había max_per_group posiciones del mismo grupo
+cash                            3   18%   no alcanzaba la plata para comprar ni una acción
+```
+
+y debajo el detalle con nombre y apellido
+(`límite por grupo sector=energy: ya hay 2 (COP, CVX) y el tope es 2`). Un
+backtest que descarta señales en silencio miente en la dirección optimista dos
+veces: no muestra lo que el riesgo de cartera frenó, y hace parecer que el sistema
+opera más de lo que puede.
+
+El informe publica además el **heat realizado** (máximo, medio y días con
+posición) contra el tope configurado. El máximo puede quedar unas décimas por
+encima del tope y no es un bug: el control es *ex ante* —se aplica contra la
+equity del cierre de la señal— y si después la equity cae, el mismo riesgo abierto
+pesa más. El informe lo explica cuando pasa.
+
 ## El cotejo contra `backtesting.py`
 
 El motor es propio, así que se coteja contra una implementación independiente:
@@ -329,14 +470,18 @@ salidas se referencian con punto (`macd.hist`, `bb.upper`).
 
 | Archivo | Qué es |
 |---|---|
-| `ema_cross.yaml` | Cruce de medias con filtro de tendencia. La del plan. |
+| `ema_cross.yaml` | Cruce de medias con filtro de tendencia. La del plan. Línea base: hard stop + trailing + objetivo. |
+| `ema_cross_sin_trailing.yaml` | La misma con el trailing apagado. **No es otra estrategia**: es el par de comparación del banco A/B y la que usan las mediciones de sizing, que son del lado de la entrada. |
+| `cartera_correlacionada.yaml` | Las mismas reglas sobre los 10 símbolos del universo correlacionado, con los cinco controles de riesgo de cartera prendidos. Existe para que la tabla de rechazos tenga algo que mostrar: con los 4 símbolos de `ema_cross` en dos sectores de a dos, `max_per_group: 2` no se puede violar nunca. |
 | `rsi_pullback.yaml` | Retroceso sobre tendencia alcista. La del plan. |
 | `breakout_52w.yaml` | **Pendiente.** Ruptura del máximo de 52 semanas: necesita el indicador `donchian`, que llega en la tanda 2. El slot queda vacío a propósito. |
 | `extra_bollinger_upper_break.yaml` | Extra, no está en el plan. Ruptura de la banda superior de Bollinger. **No reemplaza a `breakout_52w`**: el máximo móvil es momentum y Bollinger es reversión a la media. |
 
 Lo que todavía no existe se **rechaza con un mensaje que lo dice**: poner
-`trailing_stop:` hoy no se ignora en silencio, falla explicando que es de la
-tanda 2. Un backtest que ignora en silencio la mitad de tu configuración miente.
+`break_even:` hoy no se ignora en silencio, falla explicando que es del torneo de
+la 2C. Y los modos de trailing que el plan nombra pero que no están (`pct`,
+`structure`, `psar`) se rechazan igual, aunque el bloque `trailing_stop` sí
+exista. Un backtest que ignora en silencio la mitad de tu configuración miente.
 
 ## Tests
 
@@ -358,6 +503,19 @@ TRADINGBOT_CHROMIUM=/ruta/al/chromium pytest tests/test_report_responsive.py
 Los que necesitan red detectan conectividad y se saltean con el motivo; los que
 usan los CSV reales se saltean hasta que los generes.
 
+**Cuántos skips esperar.** Seis son fijos en un entorno sin red y sin los CSV
+reales: cuatro `@pytest.mark.network` y dos que necesitan `SPY.csv` / `AAPL.csv`.
+Los cuatro del navegador se suman o no según lo que haya:
+
+| Situación | Skips |
+|---|---|
+| Con Chromium (instalado o vía `TRADINGBOT_CHROMIUM`) | **6** |
+| Sin Chromium, o con la variable apuntando a un binario que no existe | **10** |
+
+Los cuatro del navegador saltan **limpio** en los tres casos —sin ruido de
+teardown— porque la verificación ocurre antes de abrir Playwright: saltear ya
+adentro del context manager deja excepciones de cierre que se leen como fallas.
+
 ## Estructura
 
 ```
@@ -365,10 +523,13 @@ tradingbot/
   config.py          carga YAML + valida con pydantic (errores claros, no KeyError)
   data/              provider ABC, yahoo, stooq, csv local, cache parquet, validación
   indicators/        trend, momentum, volatility + registry ("ema" -> función)
-  strategy/          conditions, engine (all/any/not), risk (sizing), position, exits
-  backtest/          engine (loop barra a barra), portfolio, costs, metrics, manifest
+  strategy/          conditions, engine (all/any/not), risk (sizing), position,
+                     exits (hard stop, trailing chandelier, objetivo),
+                     portfolio_risk (heat, grupos, cortacircuitos)
+  backtest/          engine (loop barra a barra), portfolio, costs, metrics,
+                     manifest, ab (banco de comparación), poder (MDE por capa)
   reporting/         informe de consola y HTML mobile-first con gráficos Plotly
-  cli.py             typer: backtest
+  cli.py             typer: backtest, comparar
 ```
 
 Las capas no se saltean: `data -> indicadores -> reglas -> backtest -> salida`.
