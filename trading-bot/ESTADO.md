@@ -9,8 +9,10 @@ lo único que no se puede reconstruir leyéndolo.
   con dos correcciones marcadas dentro del propio archivo (cómo se calcula el
   heat, y qué puede decir la alerta).
 - Cómo usar la herramienta está en [`README.md`](README.md).
-- Rama de trabajo: `claude/trading-bot-trailing-scope-uft7ul`
-  (continúa `claude/trading-analysis-bot-8ehd5h`).
+- **Rama canónica: `claude/trading-analysis-bot-8ehd5h`.** Es la única que tiene
+  toda la historia del proyecto. Si estás leyendo esto desde otra rama, lo que
+  corresponde es llevar los commits acá, no seguir ahí (ver la convención de rama
+  en la sección 10: pasó dos veces).
 
 ---
 
@@ -457,8 +459,39 @@ Dos cambios más del informe que no vienen del tope:
 
 ## 10. Convenciones que conviene no romper
 
+- **La rama canónica es `claude/trading-analysis-bot-8ehd5h` y está escrita
+  arriba de todo, en el encabezado de este archivo.** Esto no es burocracia: ya
+  pasó dos veces (C12 de la tanda 1, y otra vez al cerrar 2A/2B, que quedaron en
+  `claude/trading-bot-trailing-scope-uft7ul`) y las dos veces el proyecto terminó
+  con dos historias y con la versión buena de `PLAN.md` y `ESTADO.md` en la rama
+  equivocada.
+
+  **Por qué vuelve**: cada sesión del entorno remoto arranca con una rama de
+  trabajo *generada automáticamente* (`claude/beautiful-hamilton-4izigp`,
+  `claude/trading-bot-trailing-scope-uft7ul`, ...), distinta cada vez, inyectada
+  en las instrucciones de la sesión antes de que nadie mire el repo. No hay forma
+  de que el entorno adivine la canónica, así que **el default siempre va a estar
+  mal** y la corrección tiene que salir del repo.
+
+  **La regla, entonces, es de arranque y no de cierre**: lo primero de cada
+  sesión es leer esta línea del `ESTADO.md` y, si la rama asignada no es la
+  canónica, hacer
+  ```bash
+  git checkout -B claude/trading-analysis-bot-8ehd5h origin/claude/trading-analysis-bot-8ehd5h
+  ```
+  **antes de escribir una línea de código**. Corregirlo al final es peor: para
+  entonces ya hay commits en la rama equivocada y alguien tiene que decidir cómo
+  reunirlos. (Las dos veces se pudo resolver con fast-forward porque el trabajo
+  salió de la canónica; si alguna vez las dos ramas divergen de verdad, esto
+  pasa de ser un trámite a ser un merge.)
 - **Un commit por bloque de trabajo**, con el mensaje explicando la razón y no
   solo el qué. Los mensajes de este repo son parte de la documentación.
+  **Vale aunque dos bloques toquen los mismos archivos**: 2A (el trailing) y 2B
+  (`portfolio_risk.py`) se commitearon juntos con el argumento de que compartían
+  cuatro archivos, y el argumento no alcanza. Son independientes —se puede querer
+  el riesgo de cartera sin el trailing, y al revés— y revertir uno hoy se lleva
+  puesto el otro. El commit conjunto quedó, no se rehace; la convención es que no
+  se repite.
 - **Nada se declara terminado sin evidencia pegada**: salida de `pytest` y del
   backtest, no "listo".
 - **Lo que no está implementado se rechaza con un mensaje que lo dice.** Poner
