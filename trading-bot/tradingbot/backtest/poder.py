@@ -47,6 +47,7 @@ from typing import Callable, Sequence
 import numpy as np
 import pandas as pd
 
+from tradingbot.backtest.cocientes import PISO_CUENTA
 from tradingbot.backtest.portfolio import Trade
 
 ALPHA = 0.05
@@ -56,8 +57,9 @@ POTENCIA = 0.80
 FACTOR_SIGMA = 0.58
 
 #: menos trades afectados que esto y la media del efecto no significa nada, aunque el
-#: MDE dé holgado: es el mismo criterio que MIN_WINNERS_FOR_CONCENTRATION en metrics.py
-MIN_AFECTADOS = 10
+#: MDE dé holgado. Es el piso de CUENTA de la regla del cociente inestable
+#: (``backtest/cocientes.py``), el mismo que MIN_WINNERS_FOR_CONCENTRATION.
+MIN_AFECTADOS = PISO_CUENTA
 
 #: los parámetros por defecto de cada capa en el PLAN, que son los que fijan la fracción
 TRIGGER_BREAK_EVEN = 1.0

@@ -19,6 +19,7 @@ from typing import Iterable, Sequence
 import numpy as np
 import pandas as pd
 
+from tradingbot.backtest.cocientes import PISO_CUENTA
 from tradingbot.backtest.portfolio import Trade
 
 PERIODS_PER_YEAR = 252
@@ -199,9 +200,21 @@ def win_rate(trades: Sequence[Trade]) -> float:
 
 
 def win_loss_ratio(trades: Sequence[Trade]) -> float:
+    """Ganancia media sobre pérdida media. Sin pérdidas es ``inf``, igual que el
+    profit factor.
+
+    Devolvía ``0.0`` cuando no había perdedores, y ese cero se imprime "0.00", que
+    se lee como "la ganancia media no vale nada" — exactamente al revés de lo que
+    pasó. Es la regla del cociente inestable (``backtest/cocientes.py``) en su
+    forma extrema: con el denominador vacío no hay número que publicar, y el
+    informe ya sabe imprimir ``inf`` como ∞ y ``nan`` como —. Los dos cocientes
+    hermanos tienen que contestar lo mismo ante los mismos trades.
+    """
     wins = [t.pnl for t in trades if t.pnl > 0]
     losses = [-t.pnl for t in trades if t.pnl < 0]
-    if not wins or not losses:
+    if not losses:
+        return float("inf") if wins else 0.0
+    if not wins:
         return 0.0
     return float(np.mean(wins) / np.mean(losses))
 
@@ -250,8 +263,10 @@ def top_trades_concentration(trades: Sequence[Trade], top: int = 5) -> float:
     return float(sum(wins[:top]) / sum(wins))
 
 
-#: cuántos ganadores hacen falta para que la concentración signifique algo
-MIN_WINNERS_FOR_CONCENTRATION = 10
+#: cuántos ganadores hacen falta para que la concentración signifique algo. Es el
+#: piso de CUENTA de la regla del cociente inestable (``backtest/cocientes.py``),
+#: el mismo diez que usa ``MIN_AFECTADOS`` en poder.py.
+MIN_WINNERS_FOR_CONCENTRATION = PISO_CUENTA
 
 #: cuánto por encima de lo normal dispara el aviso
 CONCENTRATION_ALERT = 1.15

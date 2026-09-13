@@ -12,7 +12,7 @@ lo único que no se puede reconstruir leyéndolo.
 - **Rama canónica: `claude/trading-analysis-bot-8ehd5h`.** Es la única que tiene
   toda la historia del proyecto. Si estás leyendo esto desde otra rama, lo que
   corresponde es llevar los commits acá, no seguir ahí (ver la convención de rama
-  en la sección 10: pasó dos veces).
+  en la sección 11: pasó dos veces).
 
 ---
 
@@ -535,7 +535,73 @@ Dos cambios más del informe que no vienen del tope:
 
 ---
 
-## 10. Convenciones que conviene no romper
+## 10. La regla del cociente inestable
+
+Tres veces apareció el mismo error con tres caras distintas, y las tres se
+arreglaron por separado antes de que alguien notara que era el mismo error:
+
+| Dónde | Qué se publicaba | Qué pasaba |
+|---|---|---|
+| concentración del resultado | **252%** | dividía por el P&L **neto**, que es la resta de dos números grandes y puede quedar en cualquier cosa, o negativo |
+| error de la lectura ingenua | **426%** | dividía por la expectancy en plata, que con una estrategia empatada vale $0.67 |
+| cotejo contra `backtesting.py` | **118%** de diferencia de CAGR en MSFT | dividía por un CAGR de 30 puntos básicos: la diferencia absoluta era media décima de punto |
+
+En los tres el numerador estaba bien medido. El problema es que **un cociente
+hereda la estabilidad de su denominador**, y un denominador chico no achica el
+error: lo amplifica y le pone cara de porcentaje, que es peor que no publicarlo,
+porque un porcentaje se lee como una medición.
+
+**La regla, en orden de preferencia** (escrita en
+[`tradingbot/backtest/cocientes.py`](tradingbot/backtest/cocientes.py), que es de
+donde salen los pisos):
+
+1. **Elegir un denominador que contenga al numerador.** Si `B ⊇ A` por
+   construcción, el cociente vive en `[0, 1]` y no puede explotar, sin ningún
+   piso que calibrar. Es lo que se hizo con la concentración: ganancia **bruta**
+   en vez de P&L neto. Cuando esta opción existe es la mejor, porque no tiene
+   parámetro.
+2. **Si no se puede, exigir un piso explícito sobre `|B|`**, atado a la escala
+   natural del denominador y no a un número redondo elegido a ojo.
+3. **Debajo del piso va la diferencia absoluta `A − B` con su unidad, y se dice
+   por qué** no está el porcentaje. Callar el número sería peor: el lector no
+   sabría si la diferencia es chica o si el informe la escondió.
+
+Y una consecuencia que no es obvia: **un cociente cuyo valor normal depende del
+tamaño de la muestra se compara contra su propia normal para ese `n`**, no contra
+un umbral fijo. Los 5 mejores de 6 ganadores son el 98% por aritmética y los de
+50 son el 32%: un umbral de 80% mide cuántos trades hay, no concentración.
+
+Los tres pisos, con de dónde sale cada uno:
+
+| Piso | Valor | Por qué ese |
+|---|---|---|
+| `PISO_PESOS_SOBRE_R` | 5% del 1R realizado medio | la escala del propio trade. Con 1R ≈ $91 da ~$4.57 |
+| `PISO_CAGR` | 0.5 puntos porcentuales anuales | debajo de eso la diferencia entre dos motores es del orden del redondeo del cálculo |
+| `PISO_CUENTA` | 10 | una media de menos de diez números le pasa su varianza al cociente |
+
+### La auditoría: todos los cocientes que el informe publica hoy
+
+Se revisaron los que ya había, sin inventar casos nuevos. Cómo queda cada uno:
+
+| Cociente | Denominador | Veredicto |
+|---|---|---|
+| concentración (5 mejores) | ganancia **bruta** | **regla 1**: el denominador contiene al numerador, vive en `[0,1]` y no necesita piso |
+| concentración vs. lo normal | `concentration_baseline(n)` | **la consecuencia**: se compara contra su normal para ese `n`, con piso de cuenta en 10 ganadores |
+| error de la lectura ingenua | expectancy en plata | **regla 2 + 3**: piso de pesos; debajo va la diferencia. Es el único que **hoy dispara** de verdad: `ema_cross` v3 tiene $0.67 (no publica el %) y la plantilla de Bollinger $5.11 (publica, y por poco) |
+| cotejo de CAGR | CAGR del otro motor | **regla 2 + 3**: piso de CAGR, ahora desde la constante compartida en vez de un `0.005` suelto en el test |
+| exigencia del poder (`MDE/disponible`) | efecto disponible | **ya cumplía**: solo se publica si `disponible ≥ MDE`, o sea con el piso puesto en el propio numerador. Más el piso de cuenta en 10 trades afectados |
+| `profit_factor` | pérdida bruta | **ya cumplía**: sin perdedores devuelve `inf`, y el informe imprime ∞ |
+| `win_loss_ratio` | pérdida media | **estaba mal y se arregló**: devolvía `0.0` sin perdedores, que se imprime "0.00" y se lee como "la ganancia media no vale nada", justo al revés. Ahora contesta `inf`, igual que su hermano |
+| Calmar (`CAGR/\|MDD\|`) | max drawdown | **no es un caso, y conviene saber por qué**: `\|MDD\| ≥ \|peor día\|` **siempre** (el drawdown en `t` es al menos la caída de `t`), así que el denominador está acotado por abajo por la volatilidad de la propia serie. El mínimo que produce el repo es −1.40% en `rsi_pullback`, con un peor día de −0.56%. No se le puso piso porque sería código muerto |
+| Sharpe, Sortino | desvío de los retornos | **ya cumplían**: devuelven 0 si el desvío es 0 o `nan` |
+
+Lo que cambia en un informe de hoy: nada, salvo que los pisos dejaron de estar
+escritos tres veces. El valor de la regla no es el número que arregla sino que la
+próxima vez que aparezca un 300% nadie tenga que redescubrir por qué.
+
+---
+
+## 11. Convenciones que conviene no romper
 
 - **La rama canónica es `claude/trading-analysis-bot-8ehd5h` y está escrita
   arriba de todo, en el encabezado de este archivo.** Esto no es burocracia: ya

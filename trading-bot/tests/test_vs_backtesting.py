@@ -37,6 +37,7 @@ import pandas as pd
 import pytest
 from conftest import make_strategy
 
+from tradingbot.backtest.cocientes import PISO_CAGR, contra_piso
 from tradingbot.backtest.engine import run_backtest
 from tradingbot.backtest.metrics import cagr, max_drawdown
 
@@ -116,11 +117,15 @@ def test_cruce_de_medias_da_lo_mismo_en_los_dos_motores(
     assert len(ours.trades) == int(theirs["# Trades"])
 
     nuestro_cagr, su_cagr = ours.metrics["cagr"], cagr(their_equity)
-    # 5% relativo, o media décima de punto de CAGR: con CAGR cerca de cero el
-    # porcentaje relativo no significa nada
-    assert nuestro_cagr == pytest.approx(su_cagr, rel=0.05) or abs(
-        nuestro_cagr - su_cagr
-    ) < 0.005
+    # Regla del cociente inestable (tradingbot/backtest/cocientes.py): el desvío
+    # relativo solo vale si el denominador aguanta. MSFT daba 118% de diferencia
+    # sobre un CAGR de 30 puntos básicos, cuando la diferencia absoluta era media
+    # décima de punto. Debajo del piso se compara la diferencia, no el porcentaje.
+    desvio = contra_piso(nuestro_cagr, su_cagr, PISO_CAGR)
+    if desvio.publicable:
+        assert nuestro_cagr == pytest.approx(su_cagr, rel=0.05)
+    else:
+        assert abs(desvio.diferencia) < PISO_CAGR
 
     assert ours.metrics["max_drawdown"] == pytest.approx(max_drawdown(their_equity), rel=0.05)
     assert ours.metrics["final_equity"] == pytest.approx(their_equity.iloc[-1], rel=0.05)

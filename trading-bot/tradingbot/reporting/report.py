@@ -17,6 +17,7 @@ from typing import Any
 import pandas as pd
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from tradingbot.backtest.cocientes import PISO_PESOS_SOBRE_R, contra_piso
 from tradingbot.backtest.engine import BacktestResult
 from tradingbot.backtest.metrics import (
     CONCENTRATION_ALERT,
@@ -452,20 +453,21 @@ def risk_unit_lines(result: BacktestResult) -> list[str]:
             f"  OJO: leer la expectancy como '{expectancy:+.2f}R × ${declarado:,.2f}' da "
             f"${ingenua:+,.2f} por trade,"
         )
-        # Con la expectancy en plata cerca de cero, el error relativo se dispara
-        # (426%, 1.900%...) y deja de significar nada: el denominador es ruido. Ahí
-        # el número honesto es la diferencia en pesos, no el porcentaje.
-        piso = 0.05 * real if real else 1.0
-        if abs(en_plata) < piso:
+        # Regla del cociente inestable (backtest/cocientes.py): el denominador es
+        # la expectancy en plata, que con una estrategia empatada vale centavos y
+        # convierte el desvío en 426%. El piso es el 5% del 1R realizado, que es
+        # la escala del propio trade; debajo de eso va la diferencia en pesos.
+        desvio = contra_piso(ingenua, en_plata, PISO_PESOS_SOBRE_R * real if real else 1.0)
+        if not desvio.publicable:
             lines.append(
                 f"       y el promedio real es ${en_plata:+,.2f}. La diferencia es de "
-                f"${ingenua - en_plata:+,.2f} por trade; el error en % no se publica "
+                f"${desvio.diferencia:+,.2f} por trade; el error en % no se publica "
                 f"porque con la expectancy tan cerca de cero es un cociente sobre ruido."
             )
         else:
             lines.append(
                 f"       y el promedio real es ${en_plata:+,.2f}. Esa lectura se equivoca "
-                f"{abs(ingenua / en_plata - 1) * 100:.0f}%."
+                f"{desvio.desvio_relativo * 100:.0f}%."
             )
     return lines
 

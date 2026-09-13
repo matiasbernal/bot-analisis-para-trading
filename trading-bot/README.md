@@ -153,6 +153,31 @@ Tres cosas que el informe dice y conviene no pasar por alto:
   trades: no las cerró ninguna regla.
 - **De dónde salió cada serie** está rotulado (sintética, CSV local, Yahoo).
 
+### La regla del cociente inestable
+
+Un número del informe que sea un cociente se publica **solo si el denominador
+aguanta el peso**. Salió de que el mismo error apareció tres veces con tres caras
+—concentración 252%, error de lectura ingenua 426%, diferencia de CAGR 118% sobre
+30 puntos básicos— y las tres se arreglaron por separado antes de que alguien
+notara que era el mismo error. La regla, en orden:
+
+1. **Un denominador que contenga al numerador** (ganancia bruta, no P&L neto): el
+   cociente vive en `[0, 1]` y no puede explotar. Es la mejor opción porque no
+   tiene parámetro que calibrar.
+2. **Si no, un piso explícito sobre `|denominador|`**, atado a la escala natural
+   de lo que se divide y no a un número redondo.
+3. **Debajo del piso va la diferencia absoluta con su unidad, y el informe dice
+   por qué** no está el porcentaje.
+
+Y la consecuencia: un cociente cuyo valor normal depende del tamaño de la muestra
+se compara contra **su propia normal para ese n** (`5 mejores vs. lo normal`), no
+contra un umbral fijo.
+
+Los pisos viven en
+[`tradingbot/backtest/cocientes.py`](tradingbot/backtest/cocientes.py), con de
+dónde sale cada uno, y la auditoría de todos los cocientes que el informe publica
+hoy está en [`ESTADO.md`](ESTADO.md), sección 10.
+
 > **Alcance**: el informe es de la tanda 1. Cuando llegue la Fase 3 con el
 > contrafáctico, la atribución completa y el análisis MAE/MFE, la plantilla va a
 > cambiar y **la verificación responsive (390/412/1280 px) hay que repetirla**.
