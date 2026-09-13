@@ -78,6 +78,82 @@ def test_close_fuera_del_rango(raw):
         validate_ohlcv(roto, "SYN")
 
 
+# --- el ULP del ajuste retroactivo ----------------------------------------
+#: SPY 2018-01-19 bajado de Yahoo con ``auto_adjust=True``, ventana
+#: 2011-09-09 → 2026-09-13. Ese día SPY cerró en su máximo: en el dato sin
+#: ajustar ``close`` ES ``high``. El ajuste multiplica las dos columnas por el
+#: mismo factor con distinto orden de operaciones y el resultado no es
+#: bit-idéntico, así que ``close`` queda un ULP arriba de ``high``.
+SPY_2018_01_19 = {
+    "open": 245.63748413428692,
+    "high": 246.17301940917966,
+    "low": 245.05809117541804,
+    "close": 246.1730194091797,
+    "volume": 102_265_800,
+}
+
+
+def _una_vela(valores: dict) -> pd.DataFrame:
+    return pd.DataFrame(valores, index=pd.DatetimeIndex(["2018-01-19"], name="date"))
+
+
+def test_el_ulp_del_ajuste_retroactivo_no_es_un_error_de_datos():
+    """El caso real que frenaba ``fetch_fixture.py SPY --years 15``."""
+    vela = _una_vela(SPY_2018_01_19)
+    # el dato es el que es: close está por encima de high, por un ULP
+    assert vela["close"].iloc[0] > vela["high"].iloc[0]
+    exceso = (vela["close"].iloc[0] - vela["high"].iloc[0]) / vela["high"].iloc[0]
+    assert 0 < exceso < 1e-15  # ~1.2e-16, un ULP de float64
+
+    df = validate_ohlcv(vela, "SPY", check_calendar=False)
+
+    assert len(df) == 1
+    assert df["close"].iloc[0] == SPY_2018_01_19["close"]  # no se toca el dato
+
+
+def test_un_close_varios_dolares_arriba_del_high_sigue_siendo_error():
+    """Control: la tolerancia absorbe el redondeo, no una inconsistencia real."""
+    vela = _una_vela({**SPY_2018_01_19, "close": SPY_2018_01_19["high"] + 3.0})
+    with pytest.raises(DataValidationError, match="fuera del rango"):
+        validate_ohlcv(vela, "SPY", check_calendar=False)
+
+
+def test_un_centavo_de_diferencia_todavia_es_error():
+    """El error genuino más chico: un tick. 4e-5 relativo, muy arriba de 1e-9."""
+    vela = _una_vela({**SPY_2018_01_19, "close": SPY_2018_01_19["high"] + 0.01})
+    with pytest.raises(DataValidationError, match="fuera del rango"):
+        validate_ohlcv(vela, "SPY", check_calendar=False)
+
+
+def test_el_mismo_ulp_en_high_contra_low_tampoco_es_error():
+    """Una vela sin rango (halt, ETF ilíquido) sufre lo mismo entre high y low."""
+    plano = SPY_2018_01_19["low"]
+    vela = _una_vela(
+        {**SPY_2018_01_19, "open": plano, "high": np.nextafter(plano, 0.0), "low": plano,
+         "close": plano}
+    )
+    assert vela["high"].iloc[0] < vela["low"].iloc[0]
+
+    assert len(validate_ohlcv(vela, "SPY", check_calendar=False)) == 1
+
+
+def test_un_high_realmente_debajo_del_low_sigue_siendo_error():
+    vela = _una_vela({**SPY_2018_01_19, "high": SPY_2018_01_19["low"] - 1.0})
+    with pytest.raises(DataValidationError, match="high < low"):
+        validate_ohlcv(vela, "SPY", check_calendar=False)
+
+
+def test_un_open_apenas_debajo_del_low_pasa_y_uno_de_verdad_no():
+    """La cuarta comparación: el día que abre en el mínimo."""
+    plano = SPY_2018_01_19["low"]
+    ruido = _una_vela({**SPY_2018_01_19, "open": np.nextafter(plano, 0.0)})
+    assert len(validate_ohlcv(ruido, "SPY", check_calendar=False)) == 1
+
+    roto = _una_vela({**SPY_2018_01_19, "open": plano - 2.0})
+    with pytest.raises(DataValidationError, match="fuera del rango"):
+        validate_ohlcv(roto, "SPY", check_calendar=False)
+
+
 def test_volumen_cero(raw):
     roto = raw.copy()
     roto.iloc[3, roto.columns.get_loc("volume")] = 0

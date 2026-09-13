@@ -20,9 +20,62 @@ MAX_MISSING_BUSINESS_DAYS_PCT = 0.15
 #: hueco máximo, en días hábiles consecutivos, sin una sola vela
 MAX_CONSECUTIVE_MISSING_DAYS = 10
 
+#: tolerancia relativa al comparar dos precios de la misma vela entre sí.
+#:
+#: Hace falta porque el ajuste retroactivo multiplica cada columna por el mismo
+#: factor pero con distinto orden de operaciones, así que un día que cerró
+#: exactamente en su máximo (``close == high`` en el dato original) sale del
+#: proveedor con ``close`` un ULP por encima de ``high``. Caso real: SPY
+#: 2018-01-19 llega con ``close - high = 2.8e-14`` sobre precios de ~246, o sea
+#: 1.2e-16 relativo. Con ~3800 velas por símbolo y 13 símbolos, cualquier día
+#: que cierre en el máximo o abra en el mínimo dispara lo mismo.
+#:
+#: El valor es el punto medio geométrico entre los dos extremos que tiene que
+#: separar:
+#:
+#: * **Piso (ruido de punto flotante).** Un ULP es ~2.2e-16 relativo; el ajuste
+#:   encadena productos acumulados a lo largo de la serie, así que un techo
+#:   generoso para el error acumulado son unos cientos de ULP, ~1e-13.
+#: * **Techo (la inconsistencia genuina más chica).** Un feed roto que pone el
+#:   cierre fuera del rango lo hace por al menos un tick de un centavo. Sobre un
+#:   instrumento de $1000 —caro para lo que se opera acá— eso es 1e-5 relativo;
+#:   sobre los ~$250 de SPY, 4e-5.
+#:
+#: 1e-9 queda cuatro órdenes de magnitud por encima del ruido y cuatro por
+#: debajo del error más chico que vale la pena rechazar.
+#:
+#: **No se unifica con el ``TOLERANCE = 1e-6`` de ``data/cache.py``** aunque
+#: ambos absorban ruido de punto flotante: aquel compara la misma vela bajada
+#: dos veces para decidir si hubo reajuste retroactivo, y equivocarse cuesta una
+#: descarga de más. Este decide si datos rotos entran a un backtest, y
+#: equivocarse no cuesta nada visible: da un resultado perfecto y falso. Para el
+#: que importa se toma el valor más ajustado que igual absorbe el ruido, no el
+#: número que ya estaba escrito en otro lado.
+PRICE_REL_TOL = 1e-9
+
 
 class DataValidationError(ValueError):
     """Los datos no cumplen el contrato OHLCV y el backtest no puede seguir."""
+
+
+class EmptySeriesError(DataValidationError):
+    """El proveedor devolvió cero velas.
+
+    Se separa del resto porque es el único fallo de validación que puede ser
+    transitorio: el límite de tasa de Yahoo no llega como excepción de red sino
+    como serie vacía. Quien reintente puede distinguirlo de una serie que está
+    genuinamente rota, que va a estar igual de rota en el intento siguiente.
+    """
+
+
+def _mayor_que(izq: pd.Series, der: pd.Series) -> pd.Series:
+    """``izq > der``, pero solo cuando la diferencia excede ``PRICE_REL_TOL``.
+
+    El denominador es ``der``: en los casos que importan las dos series son
+    iguales salvo el error de redondeo, así que cuál de las dos se use como
+    escala no cambia nada.
+    """
+    return (izq - der) > PRICE_REL_TOL * der.abs()
 
 
 def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
@@ -72,10 +125,26 @@ def validate_ohlcv(
     Chequea: vacío, fechas duplicadas, NaN, ``high < low``, OHLC fuera del rango
     ``[low, high]``, precios <= 0, volumen negativo o cero, saltos de precio
     absurdos y velas faltantes en días hábiles.
+
+    De todos esos, los únicos que necesitan ``PRICE_REL_TOL`` son los dos que
+    comparan un precio de la vela contra otro precio de la misma vela, porque
+    son los únicos donde el dato original tiene dos columnas que valen lo mismo
+    y el ajuste retroactivo las separa. Los otros no:
+
+    * **precio <= 0** compara contra una constante, no contra otro precio. Nada
+      legítimo se apoya en el cero, y un precio que redondea a ~0 está roto de
+      todas formas.
+    * **volumen negativo o cero** es un entero y no lo toca el factor de ajuste
+      de precios.
+    * **salto de precio > 50%** es un umbral de criterio, no un punto donde dos
+      números que deberían ser iguales se separan: nada hace que un movimiento
+      real caiga exactamente en el 50%, así que un ULP de más o de menos ahí no
+      cambia ninguna decisión.
+    * **el calendario** compara fechas.
     """
     if df is None or len(df) == 0:
         # yfinance devuelve un DataFrame vacío sin error: vacío = error, siempre
-        raise DataValidationError(f"{symbol}: el proveedor devolvió 0 velas")
+        raise EmptySeriesError(f"{symbol}: el proveedor devolvió 0 velas")
 
     out = normalize_ohlcv(df)
 
@@ -91,17 +160,20 @@ def validate_ohlcv(
             f"{symbol}: {len(nan_rows)} velas con NaN, p.ej. {_fmt_dates(nan_rows[:3])}"
         )
 
-    bad = out.index[out["high"] < out["low"]]
+    # las cuatro comparaciones de precio contra precio van con PRICE_REL_TOL: en
+    # una vela que abre en el mínimo o cierra en el máximo las dos columnas son
+    # el mismo número antes de ajustar, y el ajuste las separa por un ULP
+    bad = out.index[_mayor_que(out["low"], out["high"])]
     if len(bad) > 0:
         raise DataValidationError(
             f"{symbol}: {len(bad)} velas con high < low, p.ej. {_fmt_dates(bad[:3])}"
         )
 
     outside = out.index[
-        (out["open"] > out["high"])
-        | (out["open"] < out["low"])
-        | (out["close"] > out["high"])
-        | (out["close"] < out["low"])
+        _mayor_que(out["open"], out["high"])
+        | _mayor_que(out["low"], out["open"])
+        | _mayor_que(out["close"], out["high"])
+        | _mayor_que(out["low"], out["close"])
     ]
     if len(outside) > 0:
         raise DataValidationError(
