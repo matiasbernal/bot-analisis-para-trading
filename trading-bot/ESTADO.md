@@ -52,6 +52,11 @@ resuelta el 2026-09-12 y **la decisión está escrita en `PLAN.md`**, en la secc
   ganadora. **PARADO hasta que haya CSV reales**, por la razón de la sección 2:
   sobre series sintéticas el torneo mediría el generador y no el mercado, y eso
   no lo arregla generar más trades.
+  **Y hay una segunda razón, nueva**: recalculado el poder sobre la línea base de
+  verdad (con el trailing prendido, que es como van a correr las plantillas),
+  **ninguna de las cuatro capas estimables queda medible ni siquiera a n=230**.
+  Está en `PLAN.md` §1.2, recalculado; el análisis del trailing que lo causa está
+  en la sección 12 de acá, **sin decidir**.
 
 **Estado al cerrar esta tanda (2A + 2B).** 2A completa: `position.py` con sus
 tres invariantes, el banco A/B, el poder por capa, y el trailing chandelier
@@ -646,3 +651,139 @@ próxima vez que aparezca un 300% nadie tenga que redescubrir por qué.
   sostiene, para que el día que cambie se note.
 - **Si cambia la calibración de una plantilla, sube `calibration.version` y se
   escribe qué cambió.** Subir la versión sin decirlo es un error de validación.
+
+---
+
+## 12. El trailing como línea base: el análisis, sin la decisión
+
+**Nada de esta sección está implementado y el PLAN no se tocó.** Es el análisis
+que pidió el usuario para decidir él. La plantilla `ema_cross.yaml` sigue en v3
+con el chandelier de 3 ATR y `activate_after_r: 1.0`.
+
+La pregunta: el PLAN declara `trailing_stop` línea base ("las plantillas arrancan
+con dos capas prendidas"), pero eso se escribió **antes de medir nada**, y el
+informe v3 muestra CAGR 1.39% → −0.07%, profit factor 1.43 → 1.02 y los
+`take_profit` cayendo de 8 a 2. ¿Sigue teniendo sentido?
+
+### 12.1 ¿Es el chandelier, o son sus dos parámetros?
+
+`scripts/barrido_trailing.py`, `multiple` × `activate_after_r` sobre los dos
+universos. Lo que sale tiene dos lecturas y las dos importan.
+
+**Primera: el daño está concentrado, no repartido.** En el universo
+independiente la configuración de la plantilla —3 ATR, activa en 1R— es la
+**peor celda de toda la grilla** (−0.07%), y 4 ATR con la misma activación da
++1.52%, arriba de las otras pero abajo de la línea base sin trailing (+1.39%…
+en realidad la supera). El `take_profit` se recupera en cuanto el trailing se
+aleja: 2 sobrevivientes a 3 ATR, 7 a 4 ATR, sobre los 8 de la línea base. O sea
+que el mecanismo que el informe insinuaba es real y es **de parámetro**: un
+chandelier a 3 ATR armado en +1R persigue al precio lo bastante cerca como para
+sacar antes de que el objetivo de 3R se toque.
+
+**Segunda, y es la que manda: los dos universos se contradicen sobre qué celda
+conviene.**
+
+| configuración | CAGR indep. | CAGR correlacionado |
+|---|---|---|
+| SIN trailing | +1.39% | −1.10% |
+| 2 ATR · activa 0.5R | **+1.73%** (la mejor) | **−3.15%** (la peor) |
+| 3 ATR · activa 1R (la plantilla) | −0.07% (la peor) | −1.30% |
+| 4 ATR · activa 0.5R | +1.52% | **−0.42%** (la mejor) |
+
+La celda óptima de un universo es la pésima del otro. Eso **no** es un empate
+ruidoso: es la firma de estar midiendo el generador. Dos random walks con
+distinta estructura de correlación dan órdenes opuestos, y ninguno de los dos es
+el mercado. **La grilla identifica el mecanismo y no puede elegir el
+reemplazo**, y esa es toda la conclusión que soporta.
+
+### 12.2 El contrafáctico: qué pasó en cada salida por trailing
+
+`scripts/contrafactico_trailing.py` empareja cada salida por trailing contra el
+mismo trade sin la capa. Las 17 del universo independiente (16 `trailing_stop` +
+1 `gap_trailing_stop`) y las 34 del correlacionado:
+
+| | independiente | correlacionado |
+|---|---|---|
+| el trailing **mejoró** el resultado | 10 de 17 (59%) | 24 de 34 (71%) |
+| habría terminado **mejor aguantando** | 7 de 17 (41%) | 10 de 34 (29%) |
+| ganancia media por rescate | +0.693R | +0.762R |
+| pérdida media por corte | −1.913R | −1.952R |
+| neto | **−6.46R** (−0.380R/trade) | **−1.24R** (−0.037R/trade) |
+
+**La capa acierta más veces de las que falla y pierde igual.** Ese es el
+hallazgo, y no es una opinión sobre el chandelier: es aritmética de la geometría
+configurada.
+
+```
+hard stop  −1R  ·  take profit  +3R  ·  el trailing se arma en +1R
+
+  rescate máximo posible:  de −1R a ~0R      =  +1R       (acotado por el hard stop)
+  corte máximo posible:    de +3R a ~+0.3R   =  −2.7R     (acotado por el objetivo)
+
+  -> hacen falta ~2.7 rescates por cada corte SOLO PARA EMPATAR
+```
+
+Y el número medido coincide con la cuenta:
+
+| | ratio de break-even (medido) | ratio real | neto |
+|---|---|---|---|
+| independiente | 2.76× | 1.43× | −6.46R |
+| correlacionado | 2.56× | 2.40× | −1.24R |
+
+En los dos universos el break-even cae en 2.5-2.8 rescates por corte, y el signo
+del neto sale de si el ratio real lo alcanza. El correlacionado casi lo alcanza
+(2.40 contra 2.56) y por eso queda casi en cero; el independiente no se acerca.
+
+**Lo que es y lo que no es generador-dependiente**, que es la distinción que
+salva a este análisis de la etiqueta de la sección 2:
+
+- **No lo es**: el ratio de break-even. Sale de que el hard stop está a −1R y el
+  objetivo a +3R, y de que el trailing se arma a +1R. Es la geometría del YAML.
+  Sobre cualquier serie, un trailing que se arma en +1R contra un objetivo de 3R
+  tiene que rescatar ~2.7 trades por cada uno que corta.
+- **Sí lo es**: si el ratio real lo alcanza. Eso depende de con qué frecuencia
+  un trade que llegó a +1R sigue hasta +3R en vez de darse vuelta, o sea de
+  persistencia y retrocesos — la estructura que en estas series define
+  `_ohlcv_from_shocks`.
+
+Dicho de otro modo: **el barrido y el contrafáctico no dicen que el trailing sea
+malo. Dicen que la combinación (trailing armado en +1R, objetivo en 3R) le exige
+una tasa de acierto alta, y cuál es la tasa real no se puede saber acá.**
+
+### 12.3 La recomendación
+
+**Que el trailing pase a ser candidata del torneo, no que se apague ni que se
+recalibre.** El razonamiento, en orden:
+
+1. **Recalibrar está descartado.** Es la opción que la grilla parece sugerir (4
+   ATR se ve mejor que 3 en los dos universos), y es justamente la que no se
+   puede tomar: los universos se contradicen sobre el óptimo, así que elegir
+   ahí es elegir el generador. Si se tocara el multiplicador habría que hacerlo
+   por un argumento estructural, no por la tabla.
+2. **Apagarlo tampoco.** El banco A/B da empate y el contrafáctico muestra que la
+   capa acierta en el 59-71% de los trades que toca. No hay evidencia de que
+   reste; hay evidencia de que **no se sabe**, que es distinto y es el estado que
+   corresponde.
+3. **Lo que sí cambió es el argumento para tenerla de línea base.** El PLAN la
+   puso ahí por diseño, y eso era defendible mientras el costo fuera cero. Ahora
+   está medido y no es cero: la §1.2 recalculada muestra que prenderla deja al
+   torneo sin ninguna capa medible, `break_even` incluida, que pasa a no
+   distinguirse del ruido ni capturando el 100% de su efecto disponible. **Ser
+   línea base dejó de ser gratis: cuesta el torneo entero.**
+4. Y hay una asimetría que decide: una capa que compite puede terminar prendida
+   —si gana, queda—, mientras que una capa que es línea base **no puede terminar
+   apagada jamás**, porque nunca se la mide. Con los grados de libertad que hay,
+   el default caro es el que no se puede revisar.
+
+**Qué implicaría, para dimensionarlo** (y no se hace hasta que lo decidas):
+`trailing_stop` entra al orden del torneo de 2C, la línea base pasa a ser hard
+stop + take profit solos, y la §1.2 vuelve a la columna "sin trailing", donde
+`time_stop` necesita el 23-27% y el torneo tiene al menos una capa decidible. Las
+plantillas arrancarían con el trailing apagado hasta que gane, con el motivo
+escrito, como cualquier otra capa. El costo es que contradice una regla del PLAN
+escrita explícitamente, y por eso la decisión no es mía.
+
+**Lo que NO recomiendo**, para que quede dicho: tomar cualquiera de estas
+decisiones antes de tener los CSV reales. Todo lo de arriba dimensiona el
+problema y ordena los argumentos; el número que decide —cuántos trades que
+llegan a +1R siguen hasta +3R— es una propiedad del mercado y no existe todavía.
