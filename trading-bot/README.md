@@ -83,6 +83,38 @@ Opciones: `--symbol` restringe el universo, `--offline` usa solo el cache,
 `--plotly cdn` genera un HTML liviano que necesita internet para dibujar
 (el default, `inline`, embebe Plotly y abre sin conexión).
 
+### Los informes HTML no se commitean
+
+**`reports/` está en `.gitignore` y es a propósito.** Un informe es la salida de
+una corrida sobre unos datos y un commit concretos, y el manifiesto ya guarda esa
+terna (YAML exacto, hash de los datos, commit). Guardar el HTML además tiene dos
+costos y ningún beneficio: cada informe con Plotly embebido pesa varios MB, y a
+la semana el archivo del repo y lo que el código produce dejan de coincidir sin
+que nada avise. Lo que se versiona es lo que lo genera.
+
+Los comandos, entonces, son la fuente de verdad. Los tres que valen la pena:
+
+```bash
+# la plantilla del plan, calibración v3 (hard stop + trailing + objetivo)
+tradingbot backtest -s config/strategies/ema_cross.yaml \
+                    -d tests/fixtures/synthetic \
+                    --report reports/ema_cross.html \
+                    --manifest reports/ema_cross.json
+
+# los cinco controles de riesgo de cartera, que es donde hay tabla de rechazos
+tradingbot backtest -s config/strategies/cartera_correlacionada.yaml \
+                    -d tests/fixtures/correlated \
+                    --report reports/cartera.html
+
+# el banco A/B: el trailing contra la misma corrida sin trailing
+tradingbot comparar -b config/strategies/ema_cross_sin_trailing.yaml \
+                    -v config/strategies/ema_cross.yaml \
+                    -d tests/fixtures/synthetic
+```
+
+Sin `--report` el informe sale completo por consola, que es como está pegado en
+las discusiones de este proyecto. El HTML tiene lo mismo más los gráficos.
+
 ## Generar los fixtures reales (en tu máquina)
 
 **Los fixtures que vienen en el repo son sintéticos, no datos de mercado.**
