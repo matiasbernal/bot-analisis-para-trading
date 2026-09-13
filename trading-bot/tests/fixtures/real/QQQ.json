@@ -1,0 +1,9 @@
+{
+  "adjusted": true,
+  "fetched_at": "2026-09-13T19:03:46+00:00",
+  "first": "2010-01-04",
+  "interval": "1d",
+  "last": "2025-12-30",
+  "provider": "yahoo",
+  "rows": 4023
+}
