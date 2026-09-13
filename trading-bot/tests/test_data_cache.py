@@ -140,13 +140,13 @@ def test_hash_de_datos_es_estable_y_sensible(tmp_path):
 
 def test_provider_de_csv_locales_prefiere_el_real(tmp_path):
     (tmp_path / "synthetic").mkdir()
-    SERIE.to_csv(tmp_path / "synthetic" / "SPY.csv", index_label="date")
+    SERIE.to_csv(tmp_path / "synthetic" / "SPY.csv", index_label="date", encoding="utf-8")
     provider = LocalCsvProvider(tmp_path)
     assert provider.has("SPY")
     assert provider.path_for("SPY").parent.name == "synthetic"
 
     real = SERIE.iloc[:100]
-    real.to_csv(tmp_path / "SPY.csv", index_label="date")
+    real.to_csv(tmp_path / "SPY.csv", index_label="date", encoding="utf-8")
     assert provider.path_for("SPY").parent == tmp_path
     assert len(provider.get_ohlcv("SPY")) == 100
 

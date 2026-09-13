@@ -119,7 +119,7 @@ def test_quince_anios_llegan_enteros_al_proveedor(tmp_path, sin_dormir):
     )
 
     assert provider.llamadas == [("SPY", "2010-01-01", "2025-12-31")]
-    guardado = pd.read_csv(tmp_path / "SPY.csv", parse_dates=["date"])
+    guardado = pd.read_csv(tmp_path / "SPY.csv", parse_dates=["date"], encoding="utf-8")
     assert guardado["date"].iloc[0].year == 2010 and guardado["date"].iloc[-1].year == 2025
     assert len(guardado) > 3_000  # ~252 velas por año
 
@@ -147,12 +147,12 @@ def test_refresco_sin_reajuste_pega_solo_las_velas_nuevas(tmp_path, sin_dormir):
     fetch_fixture.bajar_universo(
         provider, ["SPY"], tmp_path, start="2020-01-01", end="2020-06-30", dormir=dormir
     )
-    primero = pd.read_csv(tmp_path / "SPY.csv")
+    primero = pd.read_csv(tmp_path / "SPY.csv", encoding="utf-8")
 
     fetch_fixture.bajar_universo(
         provider, ["SPY"], tmp_path, start="2020-01-01", end="2020-07-31", dormir=dormir
     )
-    segundo = pd.read_csv(tmp_path / "SPY.csv")
+    segundo = pd.read_csv(tmp_path / "SPY.csv", encoding="utf-8")
 
     # la segunda corrida pide solo el solape, no los seis meses otra vez
     assert provider.llamadas[1][1] > "2020-05-01"
@@ -168,13 +168,13 @@ def test_refresco_con_reajuste_rebaja_el_historico_entero(tmp_path, sin_dormir):
     fetch_fixture.bajar_universo(
         provider, ["SPY"], tmp_path, start="2020-01-01", end="2020-06-30", dormir=dormir
     )
-    viejo = pd.read_csv(tmp_path / "SPY.csv")
+    viejo = pd.read_csv(tmp_path / "SPY.csv", encoding="utf-8")
 
     provider.factor = 0.98  # Yahoo reajustó todo un 2% hacia abajo
     fetch_fixture.bajar_universo(
         provider, ["SPY"], tmp_path, start="2020-01-01", end="2020-06-30", dormir=dormir
     )
-    nuevo = pd.read_csv(tmp_path / "SPY.csv")
+    nuevo = pd.read_csv(tmp_path / "SPY.csv", encoding="utf-8")
 
     # tres llamadas: completa, solape (difiere) y completa otra vez
     assert len(provider.llamadas) == 3
@@ -214,7 +214,7 @@ def test_cada_csv_queda_con_su_sidecar(tmp_path, sin_dormir):
     assert meta["adjusted"] is True
     assert meta["interval"] == "1d"
     assert meta["first"] == "2020-01-01" and meta["last"] <= "2020-06-30"
-    assert meta["rows"] == len(pd.read_csv(tmp_path / "SPY.csv"))
+    assert meta["rows"] == len(pd.read_csv(tmp_path / "SPY.csv", encoding="utf-8"))
     assert meta["fetched_at"].startswith("20") and meta["fetched_at"].endswith("+00:00")
 
 

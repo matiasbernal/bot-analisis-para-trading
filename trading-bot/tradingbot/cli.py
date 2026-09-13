@@ -26,6 +26,7 @@ from tradingbot.backtest.engine import run_backtest
 from tradingbot.backtest.manifest import build_manifest, save_manifest
 from tradingbot.backtest.poder import poder_lineas
 from tradingbot.config import ConfigError, load_settings, load_strategy, load_universe
+from tradingbot.consola import forzar_utf8
 from tradingbot.data.cache import ParquetCache
 from tradingbot.data.local import LocalCsvProvider
 from tradingbot.data.validate import DataValidationError
@@ -302,6 +303,10 @@ def _difieren_en_trailing(base, variante) -> bool:
 
 
 def main() -> None:
+    # Antes de cualquier salida: el informe escribe → y σ, y una consola cp1252
+    # (el default de Windows) no los puede codificar. El fundamento de forzarlo
+    # acá, en vez de dejarlo en manos del entorno, está en `consola.py`.
+    forzar_utf8()
     app()
 
 

@@ -596,7 +596,7 @@ def test_la_plantilla_de_cartera_corre_de_punta_a_punta_por_cli(tmp_path):
             "--strategy", str(raiz / "config/strategies/cartera_correlacionada.yaml"),
             "--data", str(raiz / "tests/fixtures/correlated"),
         ],
-        capture_output=True, text=True, cwd=raiz,
+        capture_output=True, text=True, encoding="utf-8", cwd=raiz,
     )
     assert proceso.returncode == 0, proceso.stderr
     salida = proceso.stdout
@@ -620,7 +620,7 @@ def test_sin_universe_yaml_el_limite_por_grupo_falla_con_la_ruta(tmp_path):
             "--data", str(raiz / "tests/fixtures/correlated"),
             "--universe", str(tmp_path / "no_existe.yaml"),
         ],
-        capture_output=True, text=True, cwd=raiz,
+        capture_output=True, text=True, encoding="utf-8", cwd=raiz,
     )
     assert proceso.returncode == 2
     assert "no_existe.yaml" in proceso.stderr

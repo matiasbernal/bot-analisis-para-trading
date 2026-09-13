@@ -47,6 +47,7 @@ import pandas as pd
 from tradingbot.data.cache import OVERLAP_BARS, CacheMeta, ParquetCache
 from tradingbot.data.provider import Provider
 from tradingbot.data.validate import DataValidationError, EmptySeriesError, validate_ohlcv
+from tradingbot.consola import forzar_utf8
 
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "fixtures"
 
@@ -80,7 +81,7 @@ def leer_csv(path: Path, symbol: str) -> pd.DataFrame:
     ``check_calendar=False``: un fixture puede estar recortado a propósito y eso
     no es un error de datos; lo que importa acá es el contrato de columnas.
     """
-    return validate_ohlcv(pd.read_csv(path), symbol, check_calendar=False)
+    return validate_ohlcv(pd.read_csv(path, encoding="utf-8"), symbol, check_calendar=False)
 
 
 def es_transitorio(exc: BaseException) -> bool:
@@ -173,7 +174,7 @@ def escribir(
 ) -> CacheMeta:
     """Guarda el CSV y su sidecar. El sidecar tiene el mismo esquema que el cache."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index_label="date")
+    df.to_csv(path, index_label="date", encoding="utf-8")
     meta = CacheMeta(
         provider=provider.name,
         interval=interval,
@@ -265,6 +266,9 @@ def construir_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Los scripts imprimen σ, → y √, que una consola cp1252 no puede
+    # codificar. Ver tradingbot/consola.py.
+    forzar_utf8()
     args = construir_parser().parse_args(argv)
 
     if args.provider == "yahoo":

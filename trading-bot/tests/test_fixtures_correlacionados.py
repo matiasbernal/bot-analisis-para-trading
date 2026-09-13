@@ -226,7 +226,7 @@ def test_los_fixtures_commiteados_son_los_que_genera_el_script():
         for symbol, esperado in universo.items():
             path = raiz / carpeta / f"{symbol}.csv"
             assert path.is_file(), f"falta {path}"
-            commiteado = pd.read_csv(path, index_col="date", parse_dates=True)
+            commiteado = pd.read_csv(path, index_col="date", parse_dates=True, encoding="utf-8")
             commiteado.index.name = "date"
             pd.testing.assert_frame_equal(
                 commiteado, esperado, check_freq=False, rtol=0, atol=0

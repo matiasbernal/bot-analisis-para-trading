@@ -421,7 +421,7 @@ def test_el_banco_ab_aclara_que_el_empate_no_apaga_el_trailing():
             "--data", str(raiz / "tests/fixtures/synthetic"),
             "--replicas", "500",
         ],
-        capture_output=True, text=True, cwd=raiz,
+        capture_output=True, text=True, encoding="utf-8", cwd=raiz,
     )
     assert proceso.returncode == 0, proceso.stderr
     salida = proceso.stdout

@@ -33,6 +33,12 @@ def code_commit(repo_dir: str | Path | None = None) -> str:
             cwd=str(repo_dir) if repo_dir else None,
             capture_output=True,
             text=True,
+            # el hash es ASCII, pero `text=True` sin `encoding` decodifica con la
+            # codificación local: en una máquina con locale raro un stderr de git
+            # con acentos rompería el manifiesto, que es justo lo que tiene que
+            # ser reproducible en las tres plataformas
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
             check=False,
         )

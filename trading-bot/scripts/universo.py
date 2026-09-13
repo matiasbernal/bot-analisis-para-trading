@@ -43,6 +43,7 @@ from tradingbot.backtest.poder import (
 )
 from tradingbot.config import StrategyConfig
 from tradingbot.data.local import LocalCsvProvider
+from tradingbot.consola import forzar_utf8
 
 RAIZ = Path(__file__).resolve().parents[1]
 FIXTURES = RAIZ / "tests" / "fixtures"
@@ -228,7 +229,7 @@ def bytes_por_fila(decimales: int | None) -> float:
     )
     if decimales is not None:
         df = df.round(decimales)
-    texto = df.to_csv(index_label="date")
+    texto = df.to_csv(index_label="date", encoding="utf-8")
     return (len(texto.encode("utf-8")) - len(texto.splitlines()[0]) - 1) / len(df)
 
 
@@ -244,6 +245,9 @@ def filas_totales(opcion: Opcion, anios: float) -> int:
 
 # --- salida ----------------------------------------------------------------
 def main(argv: list[str] | None = None) -> int:
+    # Los scripts imprimen σ, → y √, que una consola cp1252 no puede
+    # codificar. Ver tradingbot/consola.py.
+    forzar_utf8()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--anios", type=float, default=15.0, help="Años de historia (default 15)")
     parser.add_argument(

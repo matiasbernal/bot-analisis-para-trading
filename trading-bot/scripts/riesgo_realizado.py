@@ -30,9 +30,13 @@ import pandas as pd
 from tradingbot.backtest.engine import run_backtest
 from tradingbot.config import load_strategy
 from tradingbot.data.local import LocalCsvProvider
+from tradingbot.consola import forzar_utf8
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Los scripts imprimen σ, → y √, que una consola cp1252 no puede
+    # codificar. Ver tradingbot/consola.py.
+    forzar_utf8()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--strategy", type=Path, required=True)
     parser.add_argument("--data", type=Path, required=True)

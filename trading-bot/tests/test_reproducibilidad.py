@@ -56,7 +56,7 @@ def test_el_manifiesto_es_identico_byte_a_byte(universe_frames, tmp_path):
 
     p1 = save_manifest(m1, tmp_path / "uno.json")
     p2 = save_manifest(m2, tmp_path / "dos.json")
-    j1, j2 = json.loads(p1.read_text()), json.loads(p2.read_text())
+    j1, j2 = json.loads(p1.read_text(encoding="utf-8")), json.loads(p2.read_text(encoding="utf-8"))
     assert {k: v for k, v in j1.items() if k != "created_at"} == {
         k: v for k, v in j2.items() if k != "created_at"
     }

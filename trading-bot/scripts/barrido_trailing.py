@@ -33,6 +33,7 @@ import yaml
 from tradingbot.backtest.engine import run_backtest
 from tradingbot.config import StrategyConfig
 from tradingbot.data.local import LocalCsvProvider
+from tradingbot.consola import forzar_utf8
 
 RAIZ = Path(__file__).resolve().parents[1]
 PLANTILLA = RAIZ / "config/strategies/ema_cross.yaml"
@@ -91,6 +92,9 @@ def fila(etiqueta: str, resultado) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Los scripts imprimen σ, → y √, que una consola cp1252 no puede
+    # codificar. Ver tradingbot/consola.py.
+    forzar_utf8()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.parse_args(argv)
 
