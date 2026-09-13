@@ -53,11 +53,24 @@ resuelta el 2026-09-12 y **la decisión está escrita en `PLAN.md`**, en la secc
   ganadora. **PARADO hasta que haya CSV reales**, por la razón de la sección 2:
   sobre series sintéticas el torneo mediría el generador y no el mercado, y eso
   no lo arregla generar más trades.
-  **Y hay una segunda razón, nueva**: recalculado el poder sobre la línea base de
-  verdad (con el trailing prendido, que es como van a correr las plantillas),
-  **ninguna de las cuatro capas estimables queda medible ni siquiera a n=230**.
-  Está en `PLAN.md` §1.2, recalculado; el análisis del trailing que lo causa está
-  en la sección 12 de acá, **sin decidir**.
+  **Y había una segunda razón, que el 2026-09-13 dejó de valer**: recalculado el
+  poder con el trailing prendido como línea base, ninguna de las cuatro capas
+  estimables quedaba medible ni siquiera a n=230. Eso fue lo que hizo caer la
+  regla: el trailing pasó a ser candidata del torneo y la línea base es hard stop
+  + take profit (sección 12 de acá; el cambio está en `PLAN.md`). Rehecha la
+  proyección con la línea base nueva, **el torneo vuelve a decidir**: con 13 ETFs
+  y n=315, dos capas pasan el corte de 1/3 con los dos fixtures de acuerdo
+  (`trailing_stop` y `time_stop`) y tres con cada fixture por separado, contra
+  **cero** con la línea base vieja. La tabla completa, con las tres opciones de
+  universo, está en `PLAN.md`, "Cuántas capas decide cada universo".
+
+  **El universo elegido es el de 13 ETFs**, y lo que lo decide no es solo el
+  sesgo: sin trailing los trades duran 29 velas en vez de 17, así que el cupo de
+  cinco posiciones simultáneas pone un techo de 662 trades en 15 años **haya 13
+  símbolos o 40**. Ampliar a 33 compra una sola capa (`market_regime`, y entra
+  por 1.3 puntos en una tabla que discrepa por factores de dos entre fixtures) y
+  ampliar a 40 no compra ninguna. El sesgo de supervivencia de las 20 acciones se
+  pagaría por nada.
 
 **Estado al cerrar esta tanda (2A + 2B).** 2A completa: `position.py` con sus
 tres invariantes, el banco A/B, el poder por capa, y el trailing chandelier
