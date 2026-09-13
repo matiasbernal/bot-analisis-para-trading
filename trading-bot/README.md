@@ -406,6 +406,17 @@ encima del tope y no es un bug: el control es *ex ante* —se aplica contra la
 equity del cierre de la señal— y si después la equity cae, el mismo riesgo abierto
 pesa más. El informe lo explica cuando pasa.
 
+**Que el heat máximo quede pegado al tope sin pasarlo (3.93% contra 4.00%) es
+mérito del control y no del fixture**, y eso está medido y no supuesto: sin
+ningún control de cartera el mismo universo llega a **5.03%**, pasa el 4% en 79
+de los 890 días con posición y llega a tener **7 posiciones abiertas a la vez**.
+Los rechazos por heat son pocos en esa plantilla porque `max_per_group: 2` se
+evalúa antes y absorbe la mayor parte de la presión; con el heat como único
+control y el mismo tope, los rechazos son 20. El control se prueba además con
+topes de 3%, 2% y 1%, donde rechaza 54, 75 y 94 señales y el invariante se
+mantiene igual. Los números y el razonamiento están en
+[`ESTADO.md`](ESTADO.md), sección 5.
+
 ## El cotejo contra `backtesting.py`
 
 El motor es propio, así que se coteja contra una implementación independiente:

@@ -274,6 +274,56 @@ Todas están en `strategy/portfolio_risk.py` con su motivo al lado del código:
   test que compara el heat del motor contra una reconstrucción independiente en
   **todas** las velas del período: coinciden a 1e-17.
 
+### ¿El heat está apenas activo? Medido, no supuesto
+
+El informe de `cartera_correlacionada` publica **heat máximo 3.93% contra un tope
+de 4.00%**: el 98% del tope sin pasarlo, con pocos rechazos. Eso admite dos
+lecturas opuestas —que el control frenó justo a tiempo, o que las señales
+simultáneas son tan raras acá que el 4% nunca estuvo realmente en juego— y la
+segunda haría que el número no probara nada. Así que se midió.
+
+**La demanda existe y sobra.** Sobre el mismo universo correlacionado y **sin
+ningún control de cartera prendido**:
+
+| | |
+|---|---|
+| heat máximo | **5.03%** (25% arriba del tope) |
+| días con heat > 4% | **79** de 890 días con posición (8.9%) |
+| días con heat > 3% | 329 (37%) |
+| posiciones simultáneas | hasta **7** |
+
+O sea que el 3.93% es mérito del control y no del fixture. `test_el_fixture_
+genera_demanda_de_heat_muy_por_encima_del_tope` fija las tres cosas, para que si
+algún día el fixture deja de producir el escenario, se entere el que lo cambió y
+no el que lea el informe.
+
+**Por qué entonces solo 4 rechazos por heat.** Porque en esa plantilla el heat no
+trabaja solo: `max_per_group: 2` se evalúa antes y absorbe la mayor parte de la
+presión (saca posiciones del mismo sector, que son justo las que apilan riesgo
+correlacionado). Sacándole el límite por grupo a la misma plantilla, los rechazos
+por heat suben de 3 a 8 y los trades de 96 a 108, con el heat máximo clavado en
+3.93% en los dos casos. Y con el heat como **único** control sobre el universo
+correlacionado, al mismo tope de 4%, los rechazos son **20**. El control estaba
+atando; lo que era chico era su turno, no su fuerza.
+
+**Y la confianza no queda apoyada en ese 98%.** Un test parametrizado corre el
+mismo control con topes de 3%, 2% y 1%:
+
+| tope | trades | rechazos por heat | heat realizado máx. |
+|---|---|---|---|
+| sin tope | 106 | — | 5.03% |
+| 4.0% | 92 | 20 | 4.09% |
+| 3.0% | 68 | 54 | 3.00% |
+| 2.0% | 47 | 75 | 2.01% |
+| 1.0% | 28 | 94 | 1.00% |
+
+En los cuatro se mantiene el invariante que importa: **el heat realizado nunca se
+va más de medio punto arriba del tope**, y ese margen es el desborde *ex ante* ya
+documentado arriba (el control se aplica contra la equity del cierre de la señal;
+si después la equity cae, el mismo riesgo abierto pesa más). Tres órdenes de
+exigencia distintos y la misma aritmética: si el 3.93% fuera casualidad del
+fixture, acá se rompería.
+
 Y dos decisiones sobre los cortacircuitos:
 
 - **El mensual es un latch dentro del mes**: una vez que saltó no se levanta
