@@ -14,7 +14,7 @@ import pandas as pd
 import requests
 
 from tradingbot.data.provider import Provider
-from tradingbot.data.validate import DataValidationError, validate_ohlcv
+from tradingbot.data.validate import DataValidationError, EmptySeriesError, validate_ohlcv
 
 STOOQ_URL = "https://stooq.com/q/d/l/"
 
@@ -41,7 +41,8 @@ class StooqProvider(Provider):
         resp.raise_for_status()
         text = resp.text.strip()
         if not text or text.lower().startswith("no data"):
-            raise DataValidationError(f"{symbol}: Stooq devolvió una serie vacía")
+            # respuesta vacía: puede ser throttle, así que es reintentable
+            raise EmptySeriesError(f"{symbol}: Stooq devolvió una serie vacía")
 
         raw = pd.read_csv(io.StringIO(text))
         df = validate_ohlcv(raw, symbol)

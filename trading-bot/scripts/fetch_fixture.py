@@ -24,7 +24,10 @@ Cuatro cosas que hace y que un bucle de descarga ingenuo no hace:
   comparables.
 * **Respeta el límite de tasa**: descarga secuencial, pausa de ``--pausa``
   segundos entre símbolos (nunca ``threads=True``), y reintentos con espera que
-  se duplica, porque el 429 de Yahoo llega como serie vacía.
+  se duplica, porque el 429 de Yahoo llega como serie vacía. Los reintentos son
+  solo para lo transitorio —red, 429, serie vacía—: una serie que llegó entera
+  y no cumple el contrato OHLCV falla igual las tres veces, así que corta en el
+  primer intento en vez de gastar el backoff (ver ``es_transitorio``).
 * **Vacío = error, siempre.** Una serie vacía no se escribe: cuenta como falla
   del símbolo y el script termina con código distinto de cero.
 """
@@ -43,7 +46,7 @@ import pandas as pd
 
 from tradingbot.data.cache import OVERLAP_BARS, CacheMeta, ParquetCache
 from tradingbot.data.provider import Provider
-from tradingbot.data.validate import validate_ohlcv
+from tradingbot.data.validate import DataValidationError, EmptySeriesError, validate_ohlcv
 
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "fixtures"
 
@@ -71,6 +74,24 @@ def leer_csv(path: Path, symbol: str) -> pd.DataFrame:
     return validate_ohlcv(pd.read_csv(path), symbol, check_calendar=False)
 
 
+def es_transitorio(exc: BaseException) -> bool:
+    """Si volver a pedir lo mismo puede dar otro resultado.
+
+    * **Transitorio**: cortes de red, timeouts, y el límite de tasa de Yahoo,
+      que no llega como excepción sino como serie vacía —``EmptySeriesError``—.
+      Vacío es indistinguible de un símbolo inexistente, así que se reintenta
+      igual: si de verdad no existe, los tres intentos fallan y el error queda
+      en pie.
+    * **Permanente**: cualquier otro ``DataValidationError``. El proveedor
+      contestó, la serie llegó entera y no cumple el contrato OHLCV. Eso es
+      determinístico: el segundo intento baja los mismos bytes y los rechaza
+      por el mismo motivo. Reintentarlo solo gasta el backoff.
+    """
+    if isinstance(exc, EmptySeriesError):
+        return True
+    return not isinstance(exc, DataValidationError)
+
+
 def con_reintentos(
     descargar,
     *,
@@ -80,16 +101,16 @@ def con_reintentos(
 ) -> pd.DataFrame:
     """Llama a ``descargar()`` hasta ``reintentos`` veces, duplicando la espera.
 
-    El límite de tasa de Yahoo no llega como excepción de red sino como serie
-    vacía, que ``validate_ohlcv`` convierte en ``DataValidationError``. Es
-    indistinguible de un símbolo inexistente, así que se reintenta igual: si de
-    verdad no existe, los tres intentos fallan y el error queda en pie.
+    Solo reintenta lo que ``es_transitorio``; un fallo permanente corta en el
+    primer intento y se propaga tal cual.
     """
     ultimo: Exception | None = None
     for intento in range(1, reintentos + 1):
         try:
             return descargar()
         except Exception as exc:  # noqa: BLE001 - el motivo se reporta, no el traceback
+            if not es_transitorio(exc):
+                raise
             ultimo = exc
             if intento < reintentos:
                 aviso(f"    intento {intento}/{reintentos} falló ({exc}); reintento en {espera:.0f}s")

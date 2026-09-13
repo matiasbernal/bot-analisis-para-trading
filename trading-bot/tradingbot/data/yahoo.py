@@ -13,7 +13,7 @@ import time
 import pandas as pd
 
 from tradingbot.data.provider import Provider
-from tradingbot.data.validate import DataValidationError, validate_ohlcv
+from tradingbot.data.validate import EmptySeriesError, validate_ohlcv
 
 
 class YahooProvider(Provider):
@@ -44,7 +44,7 @@ class YahooProvider(Provider):
             start=start, end=end, interval=interval, auto_adjust=True
         )
         if raw is None or raw.empty:
-            raise DataValidationError(
+            raise EmptySeriesError(
                 f"{symbol}: Yahoo devolvió una serie vacía "
                 "(símbolo inexistente o límite de tasa). Vacío = error, siempre."
             )

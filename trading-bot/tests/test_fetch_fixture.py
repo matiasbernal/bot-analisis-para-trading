@@ -18,7 +18,7 @@ import pandas as pd
 import pytest
 
 from tradingbot.data.provider import Provider
-from tradingbot.data.validate import DataValidationError
+from tradingbot.data.validate import DataValidationError, EmptySeriesError
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -55,19 +55,35 @@ class ProveedorFalso(Provider):
     name = "falso"
     adjusted = True
 
-    def __init__(self, *, factor: float = 1.0, vacios: tuple[str, ...] = (), fallas: int = 0):
+    def __init__(
+        self,
+        *,
+        factor: float = 1.0,
+        vacios: tuple[str, ...] = (),
+        fallas: int = 0,
+        rotos: tuple[str, ...] = (),
+        caidos: tuple[str, ...] = (),
+    ):
         self.factor = factor
         self.vacios = vacios
         self.fallas_restantes = fallas
+        self.rotos = rotos  # la serie llega entera pero no cumple el contrato
+        self.caidos = caidos  # la red se corta antes de que llegue nada
         self.llamadas: list[tuple[str, str, str]] = []
 
     def get_ohlcv(self, symbol, start=None, end=None, interval="1d"):
         self.llamadas.append((symbol, str(start)[:10], str(end)[:10]))
         if self.fallas_restantes:
             self.fallas_restantes -= 1
-            raise DataValidationError(f"{symbol}: el proveedor devolvió 0 velas")
+            raise EmptySeriesError(f"{symbol}: el proveedor devolvió 0 velas")
         if symbol in self.vacios:
-            raise DataValidationError(f"{symbol}: el proveedor devolvió 0 velas")
+            raise EmptySeriesError(f"{symbol}: el proveedor devolvió 0 velas")
+        if symbol in self.caidos:
+            raise ConnectionError(f"{symbol}: la conexión se cortó")
+        if symbol in self.rotos:
+            raise DataValidationError(
+                f"{symbol}: 3 velas con high < low, p.ej. 2018-01-19, 2019-03-04, 2020-11-12"
+            )
         return serie(start, end, factor=self.factor)
 
 
@@ -293,3 +309,65 @@ def test_agotados_los_reintentos_el_error_queda_en_pie(monkeypatch):
             reintentos=3,
             aviso=lambda _: None,
         )
+
+
+def test_un_corte_de_red_se_reintenta(monkeypatch):
+    """Red caída: transitorio, aunque no sea `EmptySeriesError`."""
+    esperas: list[float] = []
+    monkeypatch.setattr(fetch_fixture.time, "sleep", esperas.append)
+    provider = ProveedorFalso(caidos=("SPY",))
+
+    with pytest.raises(ConnectionError):
+        fetch_fixture.con_reintentos(
+            lambda: provider.get_ohlcv("SPY", start="2020-01-01", end="2020-06-30"),
+            reintentos=3,
+            aviso=lambda _: None,
+        )
+
+    assert len(provider.llamadas) == 3
+    assert esperas == [fetch_fixture.ESPERA_INICIAL, fetch_fixture.ESPERA_INICIAL * 2]
+
+
+# --- transitorio vs permanente --------------------------------------------
+def test_una_falla_de_validacion_no_se_reintenta(monkeypatch):
+    """Es determinística: los tres intentos bajan los mismos bytes y los rechazan.
+
+    Antes perdía 6 segundos de backoff (2s + 4s) para llegar al mismo error.
+    """
+    esperas: list[float] = []
+    monkeypatch.setattr(fetch_fixture.time, "sleep", esperas.append)
+    provider = ProveedorFalso(rotos=("SPY",))
+
+    with pytest.raises(DataValidationError, match="high < low"):
+        fetch_fixture.con_reintentos(
+            lambda: provider.get_ohlcv("SPY", start="2020-01-01", end="2020-06-30"),
+            reintentos=3,
+            aviso=lambda _: None,
+        )
+
+    assert len(provider.llamadas) == 1  # un intento, no tres
+    assert esperas == []  # ni un segundo de backoff
+
+
+def test_que_es_transitorio_y_que_no():
+    """La regla, sin pasar por el bajador."""
+    assert fetch_fixture.es_transitorio(EmptySeriesError("SPY: 0 velas"))  # el 429 de Yahoo
+    assert fetch_fixture.es_transitorio(ConnectionError("connection reset"))
+    assert fetch_fixture.es_transitorio(TimeoutError("read timeout"))
+    assert not fetch_fixture.es_transitorio(DataValidationError("SPY: 3 velas con high < low"))
+    assert not fetch_fixture.es_transitorio(DataValidationError("SPY: hay volumen negativo"))
+
+
+def test_un_simbolo_roto_falla_una_sola_vez_y_no_frena_a_los_otros(tmp_path, sin_dormir):
+    _, dormir = sin_dormir
+    provider = ProveedorFalso(rotos=("XLE",))
+
+    fallaron = fetch_fixture.bajar_universo(
+        provider, ["SPY", "XLE", "QQQ"], tmp_path, start="2020-01-01", end="2020-06-30",
+        dormir=dormir,  # reintentos=3, el default
+    )
+
+    assert fallaron == 1
+    assert [s for s, _, _ in provider.llamadas] == ["SPY", "XLE", "QQQ"]  # XLE una vez sola
+    assert not (tmp_path / "XLE.csv").exists()
+    assert (tmp_path / "SPY.csv").exists() and (tmp_path / "QQQ.csv").exists()
