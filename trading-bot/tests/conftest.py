@@ -27,29 +27,44 @@ STOOQ_PING = "https://stooq.com/q/d/l/?s=spy.us&i=d"
 
 
 @lru_cache(maxsize=8)
-def can_reach(url: str) -> bool:
-    """¿Se llega de verdad a ese host?
+def sondear(url: str) -> tuple[bool, str]:
+    """¿Se llega de verdad a ese host, y si no, por qué no?
 
     No alcanza con abrir el socket: el proxy del entorno acepta la conexión y
     después rechaza el CONNECT con 403. Hay que pedir algo y mirar la respuesta.
+
+    Y no alcanza con distinguir "hay red" de "no hay red". Son dos fallas
+    distintas y se arreglan en lugares distintos: si el proxy rechaza el CONNECT
+    es la política de red del entorno, que se configura; si el proveedor
+    contesta 4xx (Yahoo 429, Stooq 404 sobre el endpoint de CSV) el host está
+    permitido y es el proveedor el que no quiere servirle a esta IP, y ahí no
+    hay nada que configurar. El motivo del skip dice cuál de las dos es.
     """
     try:
         import requests
 
-        return requests.get(url, timeout=6).status_code < 400
-    except Exception:  # noqa: BLE001 - cualquier falla significa "no hay red"
-        return False
+        respuesta = requests.get(url, timeout=6)
+    except Exception as exc:  # noqa: BLE001 - cualquier falla significa "no hay red"
+        return False, f"no se llega al host ({type(exc).__name__})"
+    if respuesta.status_code < 400:
+        return True, "ok"
+    return False, f"el proveedor contesta HTTP {respuesta.status_code} (el host sí es alcanzable)"
+
+
+def can_reach(url: str) -> bool:
+    return sondear(url)[0]
 
 
 def has_network() -> bool:
-    """El sandbox no llega a Yahoo ni a Stooq: los tests de red se saltean."""
+    """¿Hay datos de Yahoo? Si no, los tests de red se saltean con el motivo."""
     return can_reach(YAHOO_PING)
 
 
 def _skip_if_unreachable(url: str, nombre: str):
+    alcanzable, motivo = sondear(url)
     return pytest.mark.skipif(
-        not can_reach(url),
-        reason=f"sin salida a {nombre} (política de red del entorno)",
+        not alcanzable,
+        reason=f"sin datos de {nombre}: {motivo}",
     )
 
 

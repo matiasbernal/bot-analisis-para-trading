@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
-from conftest import has_network, requires_network, requires_stooq
+from conftest import has_network, requires_network, requires_stooq, sondear
 
 from tradingbot.data.cache import ParquetCache
 from tradingbot.data.provider import OHLCV_COLUMNS
@@ -18,6 +18,43 @@ from tradingbot.data.provider import OHLCV_COLUMNS
 
 def test_el_detector_de_red_no_explota():
     assert isinstance(has_network(), bool)
+
+
+@pytest.mark.parametrize(
+    "respuesta, esperado, fragmento",
+    [
+        (200, True, "ok"),
+        (429, False, "HTTP 429"),
+        (403, False, "HTTP 403"),
+        (None, False, "no se llega al host"),
+    ],
+)
+def test_el_detector_distingue_host_bloqueado_de_proveedor_que_no_sirve(
+    monkeypatch, respuesta, esperado, fragmento
+):
+    """Son dos fallas distintas y se arreglan en lugares distintos.
+
+    Un 403 en el CONNECT es la política de red del entorno; un 429 del proveedor
+    es Yahoo negándole datos a esta IP con el host permitido. Si el motivo del
+    skip dice siempre "política de red", el segundo caso manda a revisar una
+    configuración que ya está bien.
+    """
+    import requests
+
+    def falso_get(url, timeout=None):
+        if respuesta is None:
+            raise requests.ConnectionError("boom")
+        return type("R", (), {"status_code": respuesta})()
+
+    monkeypatch.setattr(requests, "get", falso_get)
+    sondear.cache_clear()
+    try:
+        alcanzable, motivo = sondear("https://ejemplo.invalido/ping")
+    finally:
+        sondear.cache_clear()
+
+    assert alcanzable is esperado
+    assert fragmento in motivo
 
 
 @requires_network
