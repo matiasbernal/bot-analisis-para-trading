@@ -73,6 +73,43 @@ def test_backtest_sobre_datos_reales_da_numeros_coherentes():
     )  # no NaN
 
 
+def test_la_linea_base_sobre_los_13_etfs_rinde_menos_que_buy_and_hold():
+    """La corrida completa de ESTADO.md §14, fijada.
+
+    `ema_cross_sin_trailing` sobre los 13 ETFs reales: la hipótesis de la sesión
+    del 2026-09-15 era que un cruce de medias con filtro de tendencia rinde por
+    debajo de buy & hold sobre ETFs sectoriales, y se confirma en CAGR (aunque
+    no en Calmar: el drawdown mucho más chico de la estrategia lo compensa casi
+    entero). El detalle completo, con la lectura, está en ESTADO.md §14.
+    """
+    if not all(real_fixture_path(s).is_file() for s in REAL_FIXTURES):
+        pytest.skip("faltan uno o más fixtures reales de los 13 ETFs")
+
+    config = load_strategy("config/strategies/ema_cross_sin_trailing.yaml")
+    provider = LocalCsvProvider(REAL_FIXTURES_DIR)
+    frames = {
+        s: provider.get_ohlcv(s, start=config.backtest.start, end=config.backtest.end)
+        for s in REAL_FIXTURES
+    }
+    result = run_backtest(config, frames, spy_frame=frames["SPY"])
+
+    assert len(result.rule_trades) == 249
+    m, b = result.metrics, result.benchmark_metrics
+    assert m["cagr"] == pytest.approx(0.0498, abs=0.001)
+    assert b["cagr"] == pytest.approx(0.1248, abs=0.001)  # buy & hold equiponderado
+    assert result.spy_metrics["cagr"] == pytest.approx(0.1361, abs=0.001)
+
+    # la hipótesis: por debajo de los dos benchmarks en CAGR...
+    assert m["cagr"] < b["cagr"] < result.spy_metrics["cagr"]
+    # ...pero no por falta de edge: la entrada tiene expectancy y return_on_risk
+    # positivos, medidos sobre mercado real por primera vez.
+    assert m["expectancy_r"] > 0
+    assert m["return_on_risk"] > 0
+    # y el drawdown, un tercio del de cualquiera de los dos benchmarks, es lo
+    # que casi cierra la distancia en Calmar (0.38 vs. 0.36 vs. 0.40).
+    assert abs(m["max_drawdown"]) < abs(b["max_drawdown"]) / 2
+
+
 # --- la contaminación, que es el motivo del subdirectorio -------------------
 def test_la_precedencia_del_proveedor_es_la_que_creemos(tmp_path):
     """Primero el riesgo, escrito como hecho ejecutable: la raíz PISA al subdirectorio.

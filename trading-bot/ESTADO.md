@@ -887,3 +887,226 @@ Yahoo no llega como excepción de red sino como serie vacía** —esa es la raz�
 por la que la serie vacía estaba metida en el mismo cajón que todo lo demás—.
 `es_transitorio` reintenta eso y cualquier cosa que no sea un
 `DataValidationError`; el resto corta en el primer intento.
+
+---
+
+## 14. La línea base sobre datos reales: la hipótesis, confirmada
+
+*(2026-09-15. Antes de esto, ningún número de este proyecto sobre si la
+estrategia "funciona" venía de mercado real — todo lo de las secciones 2 y 12
+son fixtures sintéticos, con la etiqueta de alcance puesta a propósito. Esto
+es lo primero que corre sobre los 13 ETFs reales con el cash ya corregido
+(sección de arriba en `PLAN.md`, "Cash real: antes de medir nada"), y responde
+una sola pregunta: ¿vale la pena seguir invirtiendo en capas de salida antes de
+saber si la entrada tiene algo que administrar?*
+
+### La corrida
+
+```
+tradingbot backtest -s config/strategies/ema_cross_sin_trailing.yaml \
+                    -d tests/fixtures/real \
+                    --symbol XLK --symbol XLF --symbol XLE --symbol XLV --symbol XLI \
+                    --symbol XLY --symbol XLP --symbol XLU --symbol XLB --symbol XLRE \
+                    --symbol SPY --symbol QQQ --symbol IWM
+```
+
+`ema_cross_sin_trailing` y no `ema_cross`: es la línea base real del PLAN (hard
+stop + take profit, sin ninguna capa del torneo prendida — el trailing sigue
+siendo candidata, sección 12). Los 13 ETFs son el universo elegido en la
+sección 1 (sesgo de supervivencia casi nulo). El informe completo, sin
+abreviar:
+
+```
+================================================================
+BACKTEST · ema_cross_trend_filter_sin_trailing
+================================================================
+Símbolos      : IWM, QQQ, SPY, XLB, XLE, XLF, XLI, XLK, XLP, XLRE, XLU, XLV, XLY
+Calibración   : v4 (2026-09-15) · initial_cash 10000 -> 100000, igual que ema_cross.yaml v4 y por el mismo motivo: el sizing degenerado por falta de cash (PLAN.md, "Cash real: antes de medir nada"). Comparte calibración de entrada con ella (max_position_pct 30, risk_pct 1.0), que es lo que hace que el banco A/B mida la capa y no dos estrategias distintas.
+Período       : 2010-01-04 → 2025-12-30  (4023 velas)
+                RANGO RECORTADO: el YAML pedía desde 2010-01-01 y hasta 2025-12-31; los datos disponibles van de 2010-01-04 a 2025-12-30
+Costos        : comisión 0.05% + slippage 0.05% por lado
+Ejecución     : señal al cierre de t, fill en la apertura de t+1 (next_open)
+
+Buy & hold    : cartera equiponderada de 13 símbolos (IWM, QQQ, SPY, XLB, XLE, XLF, XLI, XLK, XLP, XLRE, XLU, XLV, XLY), $7,692 en cada uno
+SPY           : buy & hold de SPY · CSV local (tests/fixtures/real/SPY.csv) · ya está en el universo
+                SPY está en el universo: cuenta en las dos columnas
+
+Métrica                         Estrategia      Buy & hold             SPY
+--------------------------------------------------------------------------
+Equity final                      $217,573        $655,262        $769,497
+Retorno total                      117.57%         555.26%         669.50%
+CAGR                                 4.98%          12.48%          13.61%
+Max drawdown                       -13.01%         -34.23%         -33.72%
+Duración de ese DD                   946 d           173 d           173 d
+DD más largo                         946 d           709 d           709 d
+Sharpe                                0.69            0.81            0.85
+Sortino                               0.80            0.96            1.01
+Calmar                                0.38            0.36            0.40
+Profit factor                         1.80
+Win rate                            41.37%
+Expectancy                          +0.46R
+Expectancy en plata               $+462.73
+Retorno s/ riesgo desplegado          43.77%
+Riesgo real medio (1R)           $1,057.29
+Ganancia/pérdida media                2.55
+Trades                                 249
+Racha de pérdidas                       13
+Costo de la peor racha         $-23,345.69
+5 mejores vs. lo normal              0.59×
+Días con posición                   80.61%
+
+Fiabilidad    : razonable (249 trades)
+Costos totales: comisión $8,901.06 + slippage $8,901.10
+
+Salidas por regla
+----------------------------------------------------------
+Motivo                Trades     %     P&L medio   R medio
+hard_stop                 87   35%       $-1,073    -1.05R
+take_profit               82   33%        $2,994    +2.94R
+signal                    57   23%         $-128    -0.12R
+gap_stop                  23    9%       $-1,292    -1.19R
+
+Unidad de riesgo
+----------------------------------------------------------
+  1R declarado por el YAML (risk_pct 1.0%)        $1,484.74
+  1R realizado (acciones × riesgo por acción)     $1,057.29   (0.71× del declarado)
+  Expectancy (media de pnl_r)                     +0.46R
+  Expectancy en plata (media de pnl)              $+462.73
+  Retorno sobre riesgo desplegado (Σpnl/Σriesgo)  +43.77%
+  Quién decidió el tamaño                         riesgo 64, tope 123, cash 69 (de 256 señales)
+       risk_pct NO decidió el tamaño en 192 de 256 señales.
+  AVISO: risk_pct queda decorativo en buena parte de los trades: la distancia típica al stop es 2.68% del precio y el tope de concentración manda por debajo de risk_pct/max_position_pct = 3.33% (71% de las barras). Subir max_position_pct o ensanchar el stop devuelve el control a risk_pct.
+  OJO: leer la expectancy como '+0.46R × $1,484.74' da $+689.33 por trade,
+       y el promedio real es $+462.73. Esa lectura se equivoca 49%.
+
+Heat de cartera (Σ riesgo real abierto / equity)
+----------------------------------------------------------
+  máximo                          4.32%
+  medio (días con posición)       1.92%
+  días con heat > 0               3243
+  tope                        sin definir (max_portfolio_heat_r apagado)
+
+PODER DE MEDICIÓN — cuánto efecto hace falta para distinguir una capa del ruido
+  n = 249 trades · σ del efecto = 1.47R (estimada, ver poder.py) · α = 0.05 · potencia = 80%
+
+  fracción de trades      MDE por trade      MDE sobre la
+  que la capa toca         afectado          expectancy global
+         100%                0.26R                0.26R
+          75%                0.30R                0.23R
+          50%                0.37R                0.18R
+          25%                0.52R                0.13R
+          15%                0.67R                0.10R
+
+  capa             afect    f     MDE/afect  disponible  cota       veredicto
+  trailing_stop    149   0.60      0.34R      1.16R  superior   necesita capturar el 29% del efecto disponible
+  break_even        47   0.19      0.60R      0.87R  inferior   necesita capturar el 69% del efecto disponible
+  giveback          44   0.18      0.62R      1.48R  inferior   necesita capturar el 42% del efecto disponible
+  time_stop        147   0.59      0.34R      1.88R  superior   necesita capturar el 18% del efecto disponible
+  market_regime     35   0.14      0.70R      1.39R  exacta     necesita capturar el 50% del efecto disponible
+  reversal           —      —          —           —      —          no estimable sin la capa: depende de siete señales que todavía no existen. Su f la mide el banco cuando la capa esté escrita
+  event_risk         —      —          —           —      —          no estimable sin red: necesita fechas de earnings (Ticker.earnings_dates). Queda fuera del torneo por decisión escrita en el PLAN
+
+  trailing_stop NO es candidata del torneo: entra por decisión de diseño del PLAN
+  (línea base de las plantillas). Su fila está para dimensionar, no para decidir:
+  con este universo y este período el poder no alcanza para afirmar que aporta.
+
+  'disponible' es el mejor caso de la capa sobre los trades que toca, medido
+  sobre los trades ya cerrados: capturar toda la R que quedó sobre la mesa. Ninguna
+  capa real captura todo (un chandelier devuelve 3 ATR antes de sacarte), así que el
+  veredicto se lee como exigencia: si dice 65%, la capa tiene que capturar dos tercios
+  de todo lo disponible para que el resultado se distinga de un empate.
+
+Posiciones abiertas al cierre del período: 4 (fuera de las estadísticas de trades, valuadas al último cierre)
+----------------------------------------------------------
+  IWM    entrada 2025-11-28 · 213 acciones · valuada $52,585 (+75 = +0.03R)
+  XLF    entrada 2025-12-08 · 623 acciones · valuada $34,065 (+963 = +1.17R)
+  XLI    entrada 2025-12-05 · 421 acciones · valuada $65,474 (+674 = +0.40R)
+  XLY    entrada 2025-12-05 · 547 acciones · valuada $65,541 (+641 = +0.30R)
+
+In-sample / out-of-sample (corte 2020-12-31)
+----------------------------------------------------------
+Tramo                    CAGR        MDD  Trades   Expect.    Fiabilidad
+in-sample               4.51%    -13.01%     155    +0.48R     razonable
+out-of-sample           6.21%    -12.62%      94    +0.44R         débil
+
+ · La estrategia (5.0% CAGR) rinde menos que comprar y esperar (12.5%). Por ahora no justifica operar.
+
+ · Universo elegido con información posterior: los resultados sobre acciones que hoy existen son optimistas (sesgo de supervivencia).
+
+Señales rechazadas: 74
+(el backtest refleja las señales que realmente se habrían podido tomar)
+----------------------------------------------------------
+Categoría                 Señales     %   Qué la produjo
+lugares ocupados               31   42%   max_open_positions alcanzado
+cash                           43   58%   no alcanzaba la plata para comprar ni una acción
+
+  detalle por motivo:
+    40  no hay cash para comprar ni 1 acción
+    31  max_open_positions alcanzado
+     3  sin cash al momento del fill
+
+Manifiesto    : 005ab7aee382d253  (datos e016ae9131e4ae31)
+```
+
+### La tabla que pediste, lado a lado
+
+| métrica | Estrategia | Buy & hold equiponderado | SPY |
+|---|---|---|---|
+| CAGR | **4.98%** | 12.48% | 13.61% |
+| Max drawdown | **-13.01%** | -34.23% | -33.72% |
+| Sharpe | **0.69** | 0.81 | 0.85 |
+| Sortino | 0.80 | 0.96 | 1.01 |
+| Calmar (CAGR/\|MDD\|) | 0.38 | 0.36 | 0.40 |
+| Retorno s/ riesgo desplegado | 43.77% | no aplica | no aplica |
+
+`return_on_risk` no tiene análogo en un buy & hold: esa métrica pondera cada
+trade por la plata que puso en riesgo, y un buy & hold no arriesga una
+cantidad declarada por trade, mantiene la posición entera. Está para leer la
+columna de la estrategia sola, no para compararla con las otras dos.
+
+### 2.3 — ¿Se confirma la hipótesis? Sí, y con un matiz que importa
+
+**En CAGR, que es la pregunta que se hizo, sí: la estrategia rinde menos de la
+mitad que comprar y esperar equiponderado (4.98% contra 12.48%) y todavía menos
+que SPY solo (13.61%).** In-sample y out-of-sample dan el mismo signo (4.51% y
+6.21%, los dos muy por debajo de cualquiera de los dos benchmarks), así que no
+es un artefacto del corte. `render_console` ya lo dice en su propia línea: *"La
+estrategia (5.0% CAGR) rinde menos que comprar y esperar (12.5%)."*
+
+**El matiz, porque los números de al lado no cuentan la misma historia si se
+los mira sueltos.** La estrategia no tiene expectancy negativa ni un motor sin
+filo: `profit factor` 1.80, `win rate` 41%, expectancy +0.46R, `return_on_risk`
++43.77%. Cada peso que la estrategia puso en riesgo devolvió 44 centavos de
+ganancia — eso es un sistema con edge, no uno roto. Y el drawdown lo confirma
+del otro lado: -13.01% contra el -34% de los dos benchmarks, un tercio del
+dolor. Calmar, que es CAGR sobre ese dolor, queda **por encima** del buy & hold
+equiponderado (0.38 contra 0.36) y apenas debajo de SPY (0.40): con la vara del
+riesgo tolerado, la distancia se achica mucho.
+
+**Entonces el problema no es "la entrada no tiene nada que administrar"; es
+que lo que tiene no alcanza a compilarse en CAGR con esta exposición.** `Días
+con posición: 80.61%` cuenta cuántos días hay *al menos una* posición abierta,
+no cuánto del capital está invertido: con `max_open_positions: 5` y
+`max_position_pct: 30`, el capital nunca puede estar más del 5×30% = 150%
+nominal expuesto, y en la práctica bastante menos —`riesgo 64, tope 123, cash
+69 de 256 señales`: el 27% de las señales entra recortada por falta de cash,
+justo la fricción que sección 1 mide y que $100.000 alivia sin eliminar—. Un
+buy & hold está 100% invertido todo el tiempo por definición; esta estrategia
+compra fracciones de la cartera y las vende de vuelta, muchas veces al año.
+Con edge positivo pero exposición muy por debajo de 100%, el CAGR compuesto
+queda muy por debajo del de un instrumento que está siempre adentro, aunque el
+sistema "funcione" trade a trade.
+
+**Esto sí es la respuesta a la pregunta que abrió la sesión.** El problema no
+está en que la entrada no tenga nada que ofrecer —tiene expectancy y
+`return_on_risk` positivos, medidos sobre mercado real por primera vez— sino en
+que **ninguna capa de salida del torneo (sección 12, PLAN.md "El torneo de
+capas") puede cerrar la brecha de exposición**: las siete capas actúan sobre
+posiciones ya abiertas, deciden cuándo salir de un trade que ya existe. Ninguna
+decide *cuántas* posiciones tener a la vez ni *qué tan grande* es cada una —eso
+lo deciden `risk_pct`, `max_position_pct` y `max_open_positions`, que son
+`risk/`, no `exits/`—. Prender el trailing, el break-even o cualquier otra capa
+puede mover el 4.98% unas décimas para arriba o para abajo; no lo va a acercar
+al 12-13% de estar siempre invertido, porque esa distancia no la abre ni la
+cierra ninguna regla de salida. **Esta sesión no decide qué hacer con eso — la
+consigna es parar acá con el número en la mano.**
