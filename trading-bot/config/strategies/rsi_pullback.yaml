@@ -23,9 +23,11 @@ exits:
   take_profit: {mode: rr,  ratio: 2.0}
 
 calibration:
-  version: 2
-  date: 2026-09-12
-  changed: max_position_pct 20 -> 30, por la misma razón que ema_cross.
+  version: 3
+  date: 2026-09-15
+  changed: >-
+    initial_cash 10000 -> 100000, mismo motivo que ema_cross.yaml v4: el sizing
+    degenerado por falta de cash (PLAN.md, "Cash real: antes de medir nada").
 
 execution:
   signal_on:      close
@@ -48,5 +50,5 @@ risk:
 backtest:
   start:         2010-01-01
   end:           2025-12-31
-  initial_cash:  10000
+  initial_cash:  100000
   in_sample_end: 2020-12-31

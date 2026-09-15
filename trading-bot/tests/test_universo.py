@@ -161,7 +161,7 @@ def test_las_filas_totales_cuentan_la_historia_corta():
 
 # --- el ritmo real, fijado ---------------------------------------------------
 def test_el_ritmo_real_medido_sobre_los_13_etfs():
-    """1.29 trades por símbolo-año, y el número queda fijado.
+    """1.30 trades por símbolo-año, y el número queda fijado.
 
     El fixture está congelado en el tiempo (``--start/--end``), así que esto es
     determinístico: si el ritmo se mueve, se movió el motor o la plantilla, no
@@ -171,7 +171,13 @@ def test_el_ritmo_real_medido_sobre_los_13_etfs():
     La distancia entre los dos no es ruido: los ETFs sectoriales son menos
     volátiles que las series del generador y un cruce de medias sobre una serie
     menos volátil cruza menos veces. La etiqueta del PLAN decía que el ritmo real
-    iba a ser MÁS BAJO, y lo es: 1.29 contra 1.75, un 26% menos.
+    iba a ser MÁS BAJO, y lo es: 1.30 contra 1.75, un 26% menos.
+
+    **Por qué 249 y no los 246 de antes de subir el cash.** `initial_cash` pasó
+    de $10.000 a $100.000 (PLAN.md, "Cash real: antes de medir nada"): con
+    menos cash de sobra, unas pocas señales que antes se rechazaban por falta
+    de cash ahora sí compran, así que el ritmo sube una fracción. El motor no
+    cambió; el capital de la plantilla sí.
     """
     if not (universo.REALES / "SPY.csv").is_file():
         pytest.skip("faltan los fixtures reales")
@@ -179,18 +185,21 @@ def test_el_ritmo_real_medido_sobre_los_13_etfs():
     ritmo, _ = universo.medir_ritmo(plantilla, "real", universo.REALES, [])
 
     assert ritmo.simbolos == 13
-    assert ritmo.trades == 246
-    assert ritmo.por_simbolo_anio == pytest.approx(1.29, abs=0.01)
+    assert ritmo.trades == 249
+    assert ritmo.por_simbolo_anio == pytest.approx(1.30, abs=0.01)
 
 
 def test_sobre_datos_reales_el_que_ata_es_el_cash_y_no_el_cupo():
     """Y esto contradice la palanca que el PLAN proponía para subir n.
 
     La tabla de universos dice que ``max_open_positions`` es lo que pone el techo
-    y lo que habría que tocar si se quiere más n. Sobre los 13 ETFs no es así:
-    subir el cupo de 5 a 99 compra 4 trades. Lo que rechaza señales es el cash
-    —$10.000 iniciales contra posiciones de hasta el 30%—, y eso no se destraba
-    con el cupo.
+    y lo que habría que tocar si se quiere más n. Sobre los 13 ETFs sigue sin
+    serlo del todo: subir el cupo de 5 a 99 compra 11 trades, contra los 43
+    rechazos por cash (35 sin poder comprar ni una acción + un puñado que se
+    quedan sin cash recién al fill) contra 31 por cupo. El cash sigue siendo la
+    categoría que más rechaza, aunque con $100.000 (PLAN.md, "Cash real: antes
+    de medir nada") la distancia con el cupo se achicó frente a los $10.000
+    originales.
     """
     if not (universo.REALES / "SPY.csv").is_file():
         pytest.skip("faltan los fixtures reales")
@@ -198,7 +207,7 @@ def test_sobre_datos_reales_el_que_ata_es_el_cash_y_no_el_cupo():
     con_cupo, _, _ = universo.corrida(plantilla, universo.REALES, [])
     sin_cupo, _, _ = universo.corrida(plantilla, universo.REALES, [], cupo=99)
 
-    assert len(sin_cupo.rule_trades) - len(con_cupo.rule_trades) <= 5
+    assert len(sin_cupo.rule_trades) - len(con_cupo.rule_trades) <= 15
     por_cash = sum(1 for r in con_cupo.rejections if "cash" in r.reason)
     por_cupo = sum(1 for r in con_cupo.rejections if "max_open_positions" in r.reason)
     assert por_cash > por_cupo, f"cash={por_cash} cupo={por_cupo}"

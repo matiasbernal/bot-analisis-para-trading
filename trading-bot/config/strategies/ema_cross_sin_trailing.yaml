@@ -42,12 +42,14 @@ exits:
   take_profit: {mode: rr,  ratio: 3.0}
 
 calibration:
-  version: 3
-  date: 2026-09-13
+  version: 4
+  date: 2026-09-15
   changed: >-
-    Par de comparación de ema_cross.yaml v3, con el trailing apagado. Comparte
-    calibración de entrada con ella (max_position_pct 30, risk_pct 1.0), que es
-    lo que hace que el banco A/B mida la capa y no dos estrategias distintas.
+    initial_cash 10000 -> 100000, igual que ema_cross.yaml v4 y por el mismo
+    motivo: el sizing degenerado por falta de cash (PLAN.md, "Cash real: antes
+    de medir nada"). Comparte calibración de entrada con ella (max_position_pct
+    30, risk_pct 1.0), que es lo que hace que el banco A/B mida la capa y no dos
+    estrategias distintas.
 
 execution:
   signal_on:      close          # la regla se evalúa con la vela CERRADA
@@ -70,5 +72,5 @@ risk:
 backtest:
   start:         2010-01-01
   end:           2025-12-31
-  initial_cash:  10000
+  initial_cash:  100000
   in_sample_end: 2020-12-31      # todo lo posterior queda reservado como out-of-sample

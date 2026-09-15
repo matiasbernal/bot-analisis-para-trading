@@ -774,6 +774,92 @@ no depende del código.
 
 ---
 
+## Cash real: antes de medir nada
+
+*(2026-09-15, antes de la línea base sobre ETFs reales de más abajo. Se escribe
+acá y no ahí porque contamina cualquier medición previa, no solo la que sigue.)*
+
+Con los CSV reales bajados, `scripts/universo.py` mostró algo que ningún fixture
+sintético había mostrado: de 77 señales rechazadas sobre los 13 ETFs con
+`ema_cross_sin_trailing`, **44 eran "no hay cash para comprar ni 1 acción"**.
+`initial_cash: 10000` contra ETFs de $50 a $600 dejaba muy poco margen: con
+`risk_pct: 1.0` y `max_position_pct: 30`, una sola posición grande podía agotar
+el cash disponible para el resto, y el motor rechazaba señales que ninguna regla
+de riesgo quiso rechazar — la plata simplemente no alcanzaba. Cualquier medición
+sobre esa línea base — ritmo de trades, riesgo realizado, quién decide el
+tamaño — estaba parcialmente midiendo el tamaño de la billetera, no la
+estrategia.
+
+**La corrección: `initial_cash: 100000` en las cinco plantillas** (`ema_cross`,
+`ema_cross_sin_trailing`, `cartera_correlacionada`, `rsi_pullback`,
+`extra_bollinger_upper_break`), con `calibration.version` subida en cada una.
+Nada del lado de las reglas cambió — ni entrada, ni salida, ni los topes en
+porcentaje —, así que es un cambio de escala del capital y no de la estrategia.
+
+### Lo que cambió al medir de nuevo
+
+**El riesgo realizado se pega mucho más a 1.00R.** Sobre el universo sintético
+de la tanda 1 (`ema_cross_sin_trailing`, 31 trades, tope 30%):
+
+| | $10.000 | $100.000 |
+|---|---|---|
+| mínimo | 0.828R | 0.884R |
+| media | 0.948R | 0.990R |
+| máximo | 0.997R | 1.000R |
+| desvío | 0.038 | 0.020 |
+
+Con posiciones de cientos de acciones en vez de 3 a 13, el redondeo a acciones
+enteras pesa una fracción mucho más chica del riesgo declarado. Sigue sin haber
+ningún trade por encima de 1.00R: el motor arriesga menos de lo declarado, nunca
+más, con cualquiera de los dos capitales.
+
+**Un efecto secundario que vale la pena anotar, y no es un error**: con el tope
+en 30% (el que "duerme" el sesgo por ATR, ver `ESTADO.md` sección 4), el
+coeficiente de correlación entre el riesgo realizado y la distancia al stop subió
+de 0.06 a 0.39 al subir el cash, aunque el sesgo medido en R casi no se movió
+(0.002R → 0.014R). Es la regla del cociente inestable
+(`tradingbot/backtest/cocientes.py`) actuando sobre una correlación: al bajar el
+desvío de 0.038 a 0.020, el poco ruido que queda —dos trades atados por el tope
+en vez de uno— se ve más grande en una estadística normalizada por ese desvío
+más chico. El efecto en plata sigue siendo chico frente al sesgo despierto del
+tope 20% (0.30R), que es lo que importa para decidir si el sesgo está dormido.
+`tests/test_riesgo_realizado.py` fija las dos lecturas, no solo la correlación,
+para no repetir el error que la regla del cociente inestable existe para evitar.
+
+**Sobre los 13 ETFs reales, el cash sigue siendo la categoría que más rechaza,
+pero con menos margen sobre el cupo.** `ema_cross_sin_trailing`, cupo 5:
+
+| | $10.000 | $100.000 |
+|---|---|---|
+| trades tomados | 246 | 249 |
+| rechazos totales | 77 | 74 |
+| por cash | 44 | 43 (40 + 3 al fill) |
+| por cupo (`max_open_positions`) | 31 | 31 |
+| trades si el cupo fuera 99 | 250 | 260 |
+
+El cash sigue ganándole al cupo (43 contra 31), así que la conclusión de fondo
+—subir `max_open_positions` no destraba el n del torneo, el cash sí importa—
+**no cambia**. Lo que sí cambió es el margen: con $10.000 sacar el cupo del medio
+compraba apenas 4 trades más; con $100.000 compra 11. El cash dejó de ser tan
+degenerado como para ahogar casi toda la señal que el cupo también bloquea, y
+eso hace más visible que el cupo también pesa, no que el cupo pasó a ganar.
+
+`tests/test_universo.py` fija el nuevo n (249, 1.30 t/símbolo-año) y la nueva
+distancia entre cash y cupo. `tests/test_riesgo_realizado.py` fija la nueva
+distribución del riesgo realizado y los conteos de quién decidió el tamaño con
+el tope viejo (20%), que sigue existiendo como el régimen que ejercita el aviso.
+
+### Qué NO cambió
+
+El sizing degenerado por cash era un problema del **capital de la plantilla**,
+no del motor ni de las reglas: `strategy/risk.py` ya sabía recortar por cash y
+registrar el motivo (`"no hay cash para comprar ni 1 acción"`), y lo seguía
+haciendo correctamente con $10.000. Lo que hacía falta no era código nuevo, era
+darle a la plantilla el capital que un cruce de medias sobre ETFs necesita para
+que el cash deje de ser el límite que decide casi la mitad de los rechazos.
+
+---
+
 ## Las reglas de rigor (no negociables)
 
 Esto es lo que separa un backtest útil de uno que miente:

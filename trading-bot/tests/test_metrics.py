@@ -494,18 +494,21 @@ def test_sobre_una_plantilla_del_repo_las_dos_duraciones_difieren_de_verdad():
     """Las dos filas del informe no son la misma fila: hay una plantilla que lo muestra.
 
     El caso a mano de arriba prueba que se calculan distinto, pero en el informe
-    de `ema_cross` v3 las dos dan 556 d en las tres columnas, y dos filas que
+    de `ema_cross` v4 las dos dan 1045 d en las tres columnas, y dos filas que
     siempre coinciden invitan a borrar una. La que las separa es la plantilla sin
-    trailing (la calibración v2):
+    trailing (la calibración v4 también, desde que subió `initial_cash`):
 
-        Max drawdown         -5.51%
-        Duración de ese DD    371 d   <- el episodio que llega al -5.51%
-        DD más largo          385 d   <- otro episodio, menos hondo y más largo
+        Max drawdown         -5.77%
+        Duración de ese DD    371 d   <- el episodio que llega al -5.77%
+        DD más largo          425 d   <- otro episodio, menos hondo y más largo
 
-    Son dos episodios distintos, y está verificado a mano en ESTADO.md sección 9:
-    el de 385 d va de 2018-11-02 a 2019-11-22 y el de 371 d de 2020-01-14 a
-    2021-01-19. Si alguien "simplifica" una de las dos filas viendo el 556/556 de
-    la v3, este test se pone en rojo.
+    Son dos episodios distintos: el de 425 d va de 2018-11-02 a 2020-01-01 y el
+    de 371 d de 2020-01-14 a 2021-01-19. (Antes de subir `initial_cash` a 100.000
+    el más largo cerraba el 2019-11-22, a los 385 d; el cash cambia el redondeo a
+    acciones enteras en cada señal, y eso corre la fecha de recuperación unas
+    semanas sin cambiar de qué episodio se trata.) Si alguien "simplifica" una de
+    las dos filas viendo el 1045/1045 de la v4 con trailing, este test se pone en
+    rojo.
     """
     import sys
     from pathlib import Path
@@ -526,7 +529,7 @@ def test_sobre_una_plantilla_del_repo_las_dos_duraciones_difieren_de_verdad():
     hondo = resultado.metrics["deepest_drawdown_days"]
     largo = resultado.metrics["max_drawdown_days"]
     assert hondo == 371
-    assert largo == 385
+    assert largo == 425
     assert largo > hondo, (
         "el drawdown más largo tiene que poder ser otro episodio que el más "
         "profundo; si esto empieza a coincidir siempre, una de las dos filas sobra"

@@ -322,6 +322,6 @@ def test_la_calibracion_va_al_manifiesto_y_al_informe(tmp_path):
     result = run_backtest(config, frames)
     manifest = build_manifest(config, frames, result.metrics)
 
-    assert manifest["strategy"]["calibration"]["version"] == 3
-    assert "trailing" in manifest["strategy"]["calibration"]["changed"]
-    assert "Calibración   : v3" in render_console(result)
+    assert manifest["strategy"]["calibration"]["version"] == 4
+    assert "cash" in manifest["strategy"]["calibration"]["changed"]
+    assert "Calibración   : v4" in render_console(result)

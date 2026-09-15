@@ -3,11 +3,17 @@
 Medido sobre la plantilla ema_cross y el fixture sintético (31 posiciones
 abiertas), con ``scripts/riesgo_realizado.py``:
 
-    min 0.828   p05 0.884   media 0.948   mediana 0.959   p95 0.982   max 0.997
+    min 0.884   media 0.990   mediana 0.994   p95 0.999   max 1.000
 
 Ninguna por encima de 1.00R: el motor arriesga menos de lo declarado, nunca más.
-Lo que queda de desvío es el **redondeo a acciones enteras** (3 a 13 acciones por
-posición con $10.000), más un único trade que ata el tope de concentración.
+Lo que queda de desvío es el **redondeo a acciones enteras** más dos trades que
+atan el tope de concentración.
+
+**Con ``initial_cash: 100000`` (PLAN.md, "Cash real: antes de medir nada") el
+riesgo se pega mucho más a 1.00R que antes**: con $10.000 la media daba 0.948 y
+el mínimo 0.828, porque comprar 3 a 13 acciones por posición dejaba mucho margen
+de redondeo; con diez veces más cash las posiciones son de cientos de acciones y
+el redondeo a entero pesa una fracción mucho más chica del riesgo declarado.
 
 **Antes del bloque 2 estos números eran otros**: con ``max_position_pct: 20`` la
 media era 0.778 y el mínimo 0.539, porque el tope ataba 21 de los 31 trades. El
@@ -90,10 +96,10 @@ def test_la_distribucion_medida_no_se_mueve_sin_que_nos_enteremos(medicion):
     """Fija los números del docstring: si el sizing cambia, este test lo dice."""
     _, tabla = medicion
     r = tabla["r"]
-    assert r.min() == pytest.approx(0.828, abs=0.005)
-    assert r.mean() == pytest.approx(0.948, abs=0.005)
-    assert r.max() == pytest.approx(0.997, abs=0.005)
-    assert r.std(ddof=1) == pytest.approx(0.038, abs=0.005)
+    assert r.min() == pytest.approx(0.884, abs=0.005)
+    assert r.mean() == pytest.approx(0.990, abs=0.005)
+    assert r.max() == pytest.approx(1.000, abs=0.005)
+    assert r.std(ddof=1) == pytest.approx(0.020, abs=0.005)
 
 
 def test_el_stop_esta_exactamente_a_1r_del_fill(medicion):
@@ -130,6 +136,17 @@ def test_el_sesgo_por_atr_aparece_cuando_el_tope_ata(universe_frames_module):
 
     Está **dormido** mientras risk_pct decide el tamaño (tope 30%) y **vuelve**
     apenas el tope ata (tope 20%). Este test fija las dos mediciones.
+
+    **Con ``initial_cash: 100000`` el coeficiente de correlación del tope 30 subió
+    de 0.06 a 0.39** aunque el sesgo en R casi no se movió (0.002R -> 0.014R): es
+    la regla del cociente inestable (``tradingbot/backtest/cocientes.py``) actuando
+    sobre una correlación. Con más cash el redondeo a acciones enteras pesa mucho
+    menos (std de `r` bajó de 0.038 a 0.020, ver el test de la distribución), así
+    que el poco ruido que queda —dos trades atados por el tope en vez de uno— se ve
+    más grande en una estadística normalizada por ese desvío más chico. El efecto
+    en R, que es lo que importa para la plata, sigue siendo chico frente al sesgo
+    despierto del tope 20 (0.30R). Por eso el test mira las dos cosas y no solo la
+    correlación.
     """
     datos = yaml.safe_load(open(PLANTILLA, encoding="utf-8"))
 
@@ -138,10 +155,14 @@ def test_el_sesgo_por_atr_aparece_cuando_el_tope_ata(universe_frames_module):
     datos["risk"]["max_position_pct"] = 20
     _, con_20 = _medir(StrategyConfig(**datos), universe_frames_module)
 
+    corr_20 = con_20["r"].corr(con_20["stop_pct"])
+    corr_30 = con_30["r"].corr(con_30["stop_pct"])
     # con el tope atando, el riesgo realizado sigue a la distancia del stop
-    assert con_20["r"].corr(con_20["stop_pct"]) > 0.8
-    # con el tope suelto, la relación desaparece
-    assert abs(con_30["r"].corr(con_30["stop_pct"])) < 0.3
+    assert corr_20 > 0.8
+    # con el tope suelto la relación se debilita mucho, aunque ya no cae bajo 0.3
+    # como con $10.000 (ver docstring: la correlación es un cociente y hereda la
+    # inestabilidad de un desvío más chico)
+    assert corr_30 < corr_20 * 0.5
 
     def tercios(tabla):
         bajo, alto = tabla["stop_pct"].quantile([0.33, 0.67])
@@ -152,8 +173,8 @@ def test_el_sesgo_por_atr_aparece_cuando_el_tope_ata(universe_frames_module):
 
     cerca_20, lejos_20 = tercios(con_20)
     cerca_30, lejos_30 = tercios(con_30)
-    assert lejos_20 - cerca_20 == pytest.approx(0.342, abs=0.02)  # sesgo fuerte
-    assert lejos_30 - cerca_30 == pytest.approx(0.002, abs=0.02)  # sesgo dormido
+    assert lejos_20 - cerca_20 == pytest.approx(0.302, abs=0.02)  # sesgo fuerte
+    assert lejos_30 - cerca_30 == pytest.approx(0.014, abs=0.02)  # sesgo dormido, en R
 
 
 def test_el_motor_avisa_cuando_risk_pct_queda_decorativo(universe_frames_module):
@@ -194,30 +215,42 @@ def test_con_tope_20_el_aviso_aparece_completo(con_tope_20):
     assert "max_position_pct" in aviso and "risk_pct" in aviso
 
 
-def test_con_tope_20_el_contador_dice_21_de_31(con_tope_20):
+def test_con_tope_20_el_contador_dice_22_de_31(con_tope_20):
+    """Con ``initial_cash: 100000`` el tope ata 22 de 31, no 21.
+
+    Antes, con $10.000, era 21. La diferencia de un trade viene del mismo
+    redondeo a acciones enteras que documenta el test de la distribución: con
+    diez veces más cash el umbral ``risk_pct/max_position_pct`` no se mueve
+    (es un cociente de porcentajes, no depende de la plata), pero el punto
+    exacto donde el piso entero de ``by_risk`` y ``by_concentration`` empatan sí
+    puede cambiar de lado en algún trade puntual.
+    """
     m = con_tope_20.metrics
-    assert (m["sizing_by_risk"], m["sizing_by_cap"], m["sizing_by_cash"]) == (10, 21, 0)
-    assert m["sizing_by_cap"] + m["sizing_by_cash"] == 21
+    assert (m["sizing_by_risk"], m["sizing_by_cap"], m["sizing_by_cash"]) == (9, 22, 0)
+    assert m["sizing_by_cap"] + m["sizing_by_cash"] == 22
     assert sum(m[k] for k in ("sizing_by_risk", "sizing_by_cap", "sizing_by_cash")) == 31
 
 
-def test_con_tope_20_la_lectura_ingenua_se_equivoca_45_por_ciento(con_tope_20):
+def test_con_tope_20_la_lectura_ingenua_se_equivoca_46_por_ciento(con_tope_20):
     """El número que justificó separar la unidad declarada de la realizada.
 
-    expectancy +0.251189R × $99.8929 declarados = $25.09 por trade
-    promedio real                                = $17.27 por trade
-    error = |25.09 / 17.27 − 1| = 45.3%
+    Con ``initial_cash: 100000`` todo escala ×10 en pesos (el % declarado no
+    cambia), y el error relativo se mantiene en el mismo orden:
+
+    expectancy +0.251189R × $998.29 declarados = $250.76 por trade
+    promedio real                                = $172.21 por trade
+    error = |250.76 / 172.21 − 1| = 45.6%
     """
     metricas = con_tope_20.metrics
     trades = con_tope_20.rule_trades
     declarado = sum(t.risk_target for t in trades) / len(trades)
 
-    assert declarado == pytest.approx(99.89, abs=0.05)
-    assert metricas["expectancy_money"] == pytest.approx(17.27, abs=0.05)
+    assert declarado == pytest.approx(998.29, abs=0.5)
+    assert metricas["expectancy_money"] == pytest.approx(172.21, abs=0.5)
     ingenua = metricas["expectancy_r"] * declarado
-    assert ingenua == pytest.approx(25.09, abs=0.05)
+    assert ingenua == pytest.approx(250.76, abs=0.5)
     assert abs(ingenua / metricas["expectancy_money"] - 1) * 100 == pytest.approx(
-        45.3, abs=1.0
+        45.6, abs=1.0
     )
 
 
@@ -225,9 +258,9 @@ def test_con_tope_20_el_informe_imprime_las_dos_cosas(con_tope_20):
     from tradingbot.reporting.report import risk_unit_lines
 
     texto = "\n".join(risk_unit_lines(con_tope_20))
-    assert "risk_pct NO decidió el tamaño en 21 de 31 señales" in texto
+    assert "risk_pct NO decidió el tamaño en 22 de 31 señales" in texto
     assert "AVISO:" in texto and "decorativo" in texto
-    assert "Esa lectura se equivoca 45%" in texto
+    assert "Esa lectura se equivoca 46%" in texto
 
 
 def test_con_la_plantilla_actual_nada_de_eso_aparece(medicion):
@@ -253,18 +286,25 @@ def test_con_la_expectancy_cerca_de_cero_no_se_publica_un_error_porcentual(
     """Un cociente sobre ruido no es un número: se publica la diferencia en pesos.
 
     Con el trailing prendido la expectancy en plata de este fixture queda en
-    $+0.67, y el error relativo de la lectura ingenua da 426%. Ese 426% no dice
-    nada —el denominador es ruido— y leerlo como "el informe se equivoca cuatro
-    veces" sería exactamente al revés de lo que el bloque quiere evitar.
+    $+30.00 (era $+0.67 con ``initial_cash: 10000``: todo escala con el cash, la
+    expectancy en plata incluida). Sigue por debajo del piso
+    (``PISO_PESOS_SOBRE_R`` = 5% del 1R realizado medio, que acá es $972 ->
+    piso ~$48.6), así que el cociente sigue sin publicarse por el mismo motivo
+    de siempre: el denominador es ruido, no una medición.
     """
+    from tradingbot.backtest.cocientes import PISO_PESOS_SOBRE_R
     from tradingbot.reporting.report import risk_unit_lines
 
-    config = load_strategy("config/strategies/ema_cross.yaml")  # v3, con trailing
+    config = load_strategy("config/strategies/ema_cross.yaml")  # v4, con trailing
     result = run_backtest(config, universe_frames_module)
     texto = "\n".join(risk_unit_lines(result))
 
-    assert abs(result.metrics["expectancy_money"]) < 5.0, (
-        "la expectancy en plata dejó de estar cerca de cero: el test perdió su caso"
+    trades = result.rule_trades
+    riesgo_realizado_medio = sum(t.risk_amount for t in trades) / len(trades)
+    piso = PISO_PESOS_SOBRE_R * riesgo_realizado_medio
+    assert abs(result.metrics["expectancy_money"]) < piso, (
+        "la expectancy en plata superó el piso: el test perdió su caso de "
+        "'cociente sobre ruido'"
     )
     assert "La diferencia es de $" in texto
     assert "cociente sobre ruido" in texto

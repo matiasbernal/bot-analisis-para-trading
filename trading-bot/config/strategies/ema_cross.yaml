@@ -43,15 +43,14 @@ exits:
   take_profit: {mode: rr,  ratio: 3.0}
 
 calibration:
-  version: 3
-  date: 2026-09-13
+  version: 4
+  date: 2026-09-15
   changed: >-
-    Entra el trailing chandelier (3 x ATR desde el máximo, armado en +1R) como
-    LÍNEA BASE por decisión de diseño del PLAN, no como capa medida: con este
-    universo y este período el poder no alcanza para afirmar que aporta, y sobre
-    series sintéticas no alcanzaría ni con más trades. Cambian todas las métricas
-    de salida respecto de la v2; las de entrada (sizing, 1R realizado) no, y por
-    eso se siguen midiendo sobre ema_cross_sin_trailing.yaml.
+    initial_cash 10000 -> 100000. Con $10.000 contra ETFs de $50-600 el sizing
+    quedaba degenerado: 44 de 77 rechazos eran "no hay cash para comprar ni 1
+    acción" (universo.py, medido sobre los 13 ETFs reales), que contamina
+    cualquier medición sobre la línea base. Ver PLAN.md, "Cash real: antes de
+    medir nada". Nada del lado de las reglas cambió.
 
 execution:
   signal_on:      close          # la regla se evalúa con la vela CERRADA
@@ -74,5 +73,5 @@ risk:
 backtest:
   start:         2010-01-01
   end:           2025-12-31
-  initial_cash:  10000
+  initial_cash:  100000
   in_sample_end: 2020-12-31      # todo lo posterior queda reservado como out-of-sample
