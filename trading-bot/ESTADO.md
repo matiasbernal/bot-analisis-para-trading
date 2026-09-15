@@ -72,6 +72,13 @@ resuelta el 2026-09-12 y **la decisión está escrita en `PLAN.md`**, en la secc
   ampliar a 40 no compra ninguna. El sesgo de supervivencia de las 20 acciones se
   pagaría por nada.
 
+  **El n=315 de este párrafo era proyección sobre sintéticos.** Medido sobre los
+  13 ETFs reales (con el cash ya corregido, sección de arriba) el ritmo real es
+  1.30 t/símbolo-año, no 1.75, y da 249 trades (155 in-sample), no 315. La
+  conclusión de universo no cambia; los números si se quiere planear el torneo
+  con ellos, sí. Corrección completa, con la palanca que de verdad ata (el cash,
+  no `max_open_positions`), en `PLAN.md`, "El ritmo real y la palanca, medidos".
+
 **Estado al cerrar esta tanda (2A + 2B).** 2A completa: `position.py` con sus
 tres invariantes, el banco A/B, el poder por capa, y el trailing chandelier
 —que entra por diseño, no validado—. 2B completa: `portfolio_risk.py` con los

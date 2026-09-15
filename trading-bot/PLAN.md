@@ -1473,6 +1473,26 @@ mecanismo: que la línea base consume efecto disponible y que cada capa que entr
 para las que siguen. Eso es aritmética de qué le queda a la capa siguiente, no una propiedad
 del generador.
 
+> **Corrección (2026-09-15) — el ritmo real y la palanca, medidos.** Toda la tabla de arriba
+> (1.75 t/símbolo-año, n=315 con los 13 ETFs, "subir `max_open_positions` es el camino barato")
+> es la primera etiqueta de esta sección aplicada tal como avisaba: son insumos sintéticos, y
+> el número real resultó más bajo. Medido con `ema_cross_sin_trailing` sobre los 13 ETFs
+> reales (`tests/fixtures/real`, cash ya corregido — "Cash real: antes de medir nada", más
+> arriba): **1.30 trades por símbolo-año, no 1.75** (un 26% menos, en la dirección que la
+> etiqueta ya predecía), **249 trades totales y 155 in-sample**, no 315.
+>
+> Y la palanca que este párrafo proponía —subir `max_open_positions`— **no es la que ata**.
+> Sobre los 13 ETFs reales, de 74 señales rechazadas 43 son por falta de cash (`no hay cash
+> para comprar ni 1 acción` + `sin cash al momento del fill`) contra 31 por cupo: sacar el
+> cupo del medio (`max_open_positions: 99`) compra 11 trades, no destraba nada parecido al
+> techo de 662 que esta sección calculaba. El techo por cupo es real —la aritmética de
+> `techo_por_cupo` no depende de qué fixture se use— pero sobre este universo y este período
+> el cash llega antes que el cupo, así que subir el cupo solo no compra el *n* que esta
+> sección asumía. `tests/test_universo.py` y `ESTADO.md` §"Cash real" fijan los números
+> nuevos. La conclusión de universo (13 ETFs, sesgo casi nulo) **no cambia**: lo que cambia es
+> con qué *n* hay que planear el torneo, y que la próxima palanca a probar, si hace falta más
+> *n*, es más cash o más período, no más cupo.
+
 **Fase 4 — Informes, scan, journal y web de solo lectura.** Informe HTML con equity curve,
 drawdown y gráfico de precio con marcas de entrada/salida y el motivo de cada salida. Comando
 `scan` que corre las reglas sobre las últimas velas. Alertas por Telegram + cron diario
